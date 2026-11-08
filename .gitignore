@@ -36,3 +36,7 @@ Thumbs.db
 
 # локальные настройки Claude Code
 .claude/settings.local.json
+
+# прочее
+*.pem
+.vercel
