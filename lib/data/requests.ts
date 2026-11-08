@@ -19,9 +19,10 @@ const requestListSelect = {
 } as const;
 
 export function listRequestTypes() {
+  // Сначала самые быстрые (и самые частые) справки.
   return db.requestType.findMany({
-    orderBy: { name: "asc" },
-    select: { id: true, code: true, name: true, description: true, etaDays: true },
+    orderBy: [{ etaDays: "asc" }, { name: "asc" }],
+    select: { id: true, name: true, description: true, etaDays: true },
   });
 }
 
@@ -42,11 +43,24 @@ export function getMyRequest(ctx: StudentContext, requestId: string) {
   });
 }
 
-export async function createMyRequest(ctx: StudentContext, input: CreateRequestInput) {
-  const type = await db.requestType.findUnique({ where: { id: input.typeId }, select: { id: true } });
-  if (!type) return null;
+/** Защита от спама: сколько заявок может быть «в работе» одновременно и сколько можно подать за час. */
+export const MAX_ACTIVE_REQUESTS = 10;
+export const MAX_REQUESTS_PER_HOUR = 5;
 
-  return db.request.create({
+export type CreateRequestResult = { ok: true; id: string } | { ok: false; reason: "unknown-type" | "too-many-active" | "too-many-recent" };
+
+export async function createMyRequest(ctx: StudentContext, input: CreateRequestInput): Promise<CreateRequestResult> {
+  const type = await db.requestType.findUnique({ where: { id: input.typeId }, select: { id: true } });
+  if (!type) return { ok: false, reason: "unknown-type" };
+
+  const [active, recent] = await Promise.all([
+    db.request.count({ where: { studentId: ctx.studentId, status: { in: ["SUBMITTED", "IN_PROGRESS"] } } }),
+    db.request.count({ where: { studentId: ctx.studentId, createdAt: { gte: new Date(Date.now() - 3_600_000) } } }),
+  ]);
+  if (active >= MAX_ACTIVE_REQUESTS) return { ok: false, reason: "too-many-active" };
+  if (recent >= MAX_REQUESTS_PER_HOUR) return { ok: false, reason: "too-many-recent" };
+
+  const created = await db.request.create({
     data: {
       studentId: ctx.studentId, // владелец — всегда из сессии, никогда из формы
       typeId: type.id,
@@ -54,6 +68,7 @@ export async function createMyRequest(ctx: StudentContext, input: CreateRequestI
     },
     select: { id: true },
   });
+  return { ok: true, id: created.id };
 }
 
 // ─── Сотрудник деканата ─────────────────────────────────────────────
@@ -75,6 +90,22 @@ export function listFacultyRequests(ctx: StaffContext, status?: RequestStatus) {
       },
     },
   });
+}
+
+/** Количество заявок факультета по статусам — для счётчиков на фильтрах. */
+export async function countFacultyRequestsByStatus(ctx: StaffContext) {
+  const rows = await db.request.groupBy({
+    by: ["status"],
+    where: staffScope(ctx),
+    _count: { _all: true },
+  });
+  const counts: Partial<Record<RequestStatus, number>> = {};
+  let total = 0;
+  for (const r of rows) {
+    counts[r.status] = r._count._all;
+    total += r._count._all;
+  }
+  return { counts, total };
 }
 
 const STATUS_LABELS: Record<RequestStatus, string> = {

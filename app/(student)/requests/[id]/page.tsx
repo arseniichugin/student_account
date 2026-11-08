@@ -3,7 +3,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, CheckCircle2 } from "lucide-react";
 import { StatusBadge } from "@/components/status-badge";
-import { Card } from "@/components/ui/card";
+import { StatusTimeline } from "@/components/status-timeline";
+import { Card, CardTitle } from "@/components/ui/card";
+import { DetailsList } from "@/components/ui/details-list";
 import { requireStudent } from "@/lib/auth/guards";
 import { getMyRequest } from "@/lib/data/requests";
 import { formatDateTime } from "@/lib/utils";
@@ -22,9 +24,17 @@ export default async function RequestPage({ params, searchParams }: PageProps<"/
   if (!request) notFound();
 
   const payload = (request.payload ?? {}) as Payload;
+  const details: [string, string][] = [
+    ["Подана", formatDateTime(request.createdAt)],
+    ["Обновлена", formatDateTime(request.updatedAt)],
+  ];
+  if (payload.destination) details.push(["Куда", payload.destination]);
+  if (payload.copies) details.push(["Экземпляров", String(payload.copies)]);
+  if (payload.comment) details.push(["Ваш комментарий", payload.comment]);
+  details.push(["Срок готовности", `обычно ${request.type.etaDays} раб. дн.`]);
 
   return (
-    <div className="mx-auto max-w-xl space-y-4">
+    <div className="space-y-4 lg:space-y-5">
       <Link href="/requests" className="inline-flex min-h-11 items-center gap-1 text-sm text-muted hover:text-text">
         <ArrowLeft className="size-4" aria-hidden /> К заявкам
       </Link>
@@ -37,36 +47,33 @@ export default async function RequestPage({ params, searchParams }: PageProps<"/
       )}
 
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <h1 className="text-[24px] leading-tight font-bold">{request.type.name}</h1>
+        <h1 className="text-[24px] leading-tight font-bold lg:text-[32px]">{request.type.name}</h1>
         <StatusBadge status={request.status} className="text-sm" />
       </div>
 
-      {request.staffComment && (
-        <Card className={request.status === "REJECTED" ? "border-danger/30 bg-danger-soft" : "bg-primary-soft border-primary/20"}>
-          <p className="text-sm font-medium">Комментарий деканата</p>
-          <p className="mt-1 text-[15px]">{request.staffComment}</p>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-6">
+        <div className="space-y-4">
+          {request.staffComment && (
+            <Card
+              className={
+                request.status === "REJECTED" ? "border-danger/30 bg-danger-soft" : "border-primary/20 bg-primary-soft"
+              }
+            >
+              <p className="text-sm font-medium">Комментарий деканата</p>
+              <p className="mt-1 text-[15px]">{request.staffComment}</p>
+            </Card>
+          )}
+          <Card>
+            <CardTitle className="mb-1 text-[15px]">Детали заявки</CardTitle>
+            <DetailsList items={details} />
+          </Card>
+        </div>
+
+        <Card className="self-start">
+          <CardTitle className="mb-4 text-[15px]">Где сейчас заявка</CardTitle>
+          <StatusTimeline status={request.status} />
         </Card>
-      )}
-
-      <Card>
-        <dl className="divide-y divide-border">
-          <Row label="Подана" value={formatDateTime(request.createdAt)} />
-          <Row label="Обновлена" value={formatDateTime(request.updatedAt)} />
-          {payload.destination && <Row label="Куда" value={payload.destination} />}
-          {payload.copies && <Row label="Экземпляров" value={String(payload.copies)} />}
-          {payload.comment && <Row label="Ваш комментарий" value={payload.comment} />}
-          <Row label="Срок готовности" value={`обычно ${request.type.etaDays} раб. дн.`} />
-        </dl>
-      </Card>
-    </div>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex flex-col gap-0.5 py-2.5 sm:flex-row sm:justify-between sm:gap-6">
-      <dt className="text-sm text-muted">{label}</dt>
-      <dd className="text-[15px] sm:text-right">{value}</dd>
+      </div>
     </div>
   );
 }

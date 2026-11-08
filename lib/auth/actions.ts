@@ -4,8 +4,9 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { getDummyHash, verifyPassword } from "@/lib/auth/password";
-import { isLoginRateLimited, recordLoginAttempt } from "@/lib/auth/rate-limit";
+import { isLoginRateLimited, markLoginAttemptSuccessful, startLoginAttempt } from "@/lib/auth/rate-limit";
 import { createSession, destroyCurrentSession, getCurrentSession } from "@/lib/auth/session";
+import { isDemoMode } from "@/lib/config";
 import { changeMyPassword } from "@/lib/data/account";
 import { changePasswordSchema, loginSchema } from "@/lib/validation/auth";
 
@@ -13,9 +14,12 @@ export type FormState = { error?: string; success?: string } | undefined;
 export type LoginState = { error?: string; login?: string } | undefined;
 
 async function clientIp(): Promise<string> {
+  // Заголовкам с адресом клиента верим, только если перед приложением стоит НАШ прокси
+  // (Caddy/nginx), который сам выставляет X-Real-IP и затирает присланный клиентом.
+  // Иначе любой мог бы подставить случайный адрес и обойти лимит попыток по IP.
+  if (process.env.TRUST_PROXY !== "1") return "direct";
   const h = await headers();
-  // На сервере за обратным прокси (nginx) реальный адрес приходит в X-Forwarded-For.
-  return h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || "unknown";
+  return h.get("x-real-ip")?.trim() || "unknown";
 }
 
 export async function loginAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
@@ -34,17 +38,19 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     return { error: "Слишком много попыток входа. Попробуйте через 15 минут.", login: typedLogin };
   }
 
+  // Попытка учитывается ещё до проверки пароля — параллельные запросы не обойдут лимит.
+  const attemptId = await startLoginAttempt(login, ip);
+
   const user = await db.user.findUnique({ where: { login }, select: { id: true, passwordHash: true } });
   // Даже если логина нет, проверяем «пустой» хеш — чтобы время ответа было одинаковым.
   const ok = user
     ? await verifyPassword(user.passwordHash, password)
     : (await verifyPassword(await getDummyHash(), password), false);
 
-  await recordLoginAttempt(login, ip, ok);
-
   // Одно сообщение на оба случая: не подсказываем, что именно неверно.
   if (!ok || !user) return { error: "Неверный логин или пароль", login: typedLogin };
 
+  await markLoginAttemptSuccessful(attemptId);
   await createSession(user.id);
   redirect("/");
 }
@@ -57,6 +63,15 @@ export async function logoutAction(): Promise<void> {
 export async function changePasswordAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const session = await getCurrentSession();
   if (!session) redirect("/login");
+
+  // Демо-аккаунты общие для всех посетителей (жюри): смена пароля закрыла бы вход остальным.
+  if (isDemoMode()) return { error: "В демо-версии смена пароля отключена: этими аккаунтами пользуются все посетители." };
+
+  // Подбор текущего пароля ограничен так же, как вход.
+  const ip = await clientIp();
+  if (await isLoginRateLimited(session.user.login, ip)) {
+    return { error: "Слишком много попыток. Попробуйте через 15 минут." };
+  }
 
   const parsed = changePasswordSchema.safeParse({
     currentPassword: formData.get("currentPassword"),
@@ -71,6 +86,9 @@ export async function changePasswordAction(_prev: FormState, formData: FormData)
     parsed.data.currentPassword,
     parsed.data.newPassword,
   );
-  if (result === "wrong-password") return { error: "Текущий пароль указан неверно" };
+  if (result === "wrong-password") {
+    await startLoginAttempt(session.user.login, ip); // неудачная попытка идёт в общий счётчик
+    return { error: "Текущий пароль указан неверно" };
+  }
   return { success: "Пароль изменён. На других устройствах нужно будет войти заново." };
 }

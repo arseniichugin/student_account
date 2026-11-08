@@ -10,10 +10,17 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { StaffContext, StudentContext } from "@/lib/auth/guards";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
-import { MAX_FAILED_ATTEMPTS, isLoginRateLimited, recordLoginAttempt } from "@/lib/auth/rate-limit";
+import {
+  MAX_FAILED_ATTEMPTS,
+  MAX_FAILED_PER_LOGIN,
+  isLoginRateLimited,
+  recordLoginAttempt,
+} from "@/lib/auth/rate-limit";
 import { db } from "@/lib/db";
 import { getMyStudentProfile } from "@/lib/data/profile";
 import {
+  MAX_ACTIVE_REQUESTS,
+  MAX_REQUESTS_PER_HOUR,
   createMyRequest,
   getMyRequest,
   listFacultyRequests,
@@ -85,12 +92,12 @@ describe("Студент видит только свои данные", () => {
       copies: 1,
       comment: "",
     });
-    expect(created).not.toBeNull();
-    createdRequestIds.push(created!.id);
+    if (!created.ok) throw new Error(created.reason);
+    createdRequestIds.push(created.id);
 
-    const row = await db.request.findUniqueOrThrow({ where: { id: created!.id } });
+    const row = await db.request.findUniqueOrThrow({ where: { id: created.id } });
     expect(row.studentId).toBe(dima.studentId);
-    expect(await getMyRequest(anna, created!.id)).toBeNull();
+    expect(await getMyRequest(anna, created.id)).toBeNull();
   });
 });
 
@@ -117,17 +124,18 @@ describe("Сотрудник видит только заявки своего �
   it("смена статуса своей заявки уведомляет студента", async () => {
     const type = await db.requestType.findFirstOrThrow();
     const created = await createMyRequest(anna, { typeId: type.id, destination: "Тест", copies: 1, comment: "" });
-    createdRequestIds.push(created!.id);
+    if (!created.ok) throw new Error(created.reason);
+    createdRequestIds.push(created.id);
 
     const updated = await updateFacultyRequestStatus(efStaff, {
-      requestId: created!.id,
+      requestId: created.id,
       status: "READY",
       comment: "Готово",
     });
     expect(updated?.status).toBe("READY");
 
     const notification = await db.notification.findFirst({
-      where: { userId: anna.userId, link: `/requests/${created!.id}` },
+      where: { userId: anna.userId, link: `/requests/${created.id}` },
     });
     expect(notification).not.toBeNull();
   });
@@ -163,5 +171,44 @@ describe("Защита от подбора пароля", () => {
 
     await recordLoginAttempt(login, ip, false);
     expect(await isLoginRateLimited(login, ip)).toBe(true);
+  });
+
+  it("ошибки с одного адреса не блокируют вход в этот аккаунт с другого адреса", async () => {
+    // Иначе посторонний мог бы заблокировать демо-аккаунт для жюри.
+    const login = `test-bruteforce-pair-${Date.now()}`;
+    for (let i = 0; i < MAX_FAILED_ATTEMPTS; i++) await recordLoginAttempt(login, "203.0.113.8", false);
+    expect(await isLoginRateLimited(login, "203.0.113.8")).toBe(true);
+    expect(await isLoginRateLimited(login, "198.51.100.20")).toBe(false);
+  });
+
+  it(`общий лимит по логину срабатывает только после ${MAX_FAILED_PER_LOGIN} ошибок с разных адресов`, async () => {
+    const login = `test-bruteforce-global-${Date.now()}`;
+    await db.loginAttempt.createMany({
+      data: Array.from({ length: MAX_FAILED_PER_LOGIN }, (_, i) => ({
+        login,
+        ip: `10.0.${Math.floor(i / 4)}.${i % 4}`, // по 1 ошибке с разных адресов
+        success: false,
+      })),
+    });
+    expect(await isLoginRateLimited(login, "192.0.2.55")).toBe(true);
+  });
+});
+
+describe("Защита от спама заявками", () => {
+  it(`за час можно подать не больше ${MAX_REQUESTS_PER_HOUR} заявок`, async () => {
+    const type = await db.requestType.findFirstOrThrow();
+    const timur = await studentCtx("timur.kim");
+    const results = [];
+    for (let i = 0; i < MAX_REQUESTS_PER_HOUR + 1; i++) {
+      const r = await createMyRequest(timur, { typeId: type.id, destination: "Тест лимита", copies: 1, comment: "" });
+      if (r.ok) createdRequestIds.push(r.id);
+      results.push(r);
+    }
+    const recentBefore = await db.request.count({
+      where: { studentId: timur.studentId, createdAt: { gte: new Date(Date.now() - 3_600_000) } },
+    });
+    expect(recentBefore).toBeLessThanOrEqual(MAX_REQUESTS_PER_HOUR);
+    expect(results.at(-1)).toEqual({ ok: false, reason: "too-many-recent" });
+    expect(MAX_ACTIVE_REQUESTS).toBeGreaterThan(MAX_REQUESTS_PER_HOUR);
   });
 });

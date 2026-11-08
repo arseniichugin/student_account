@@ -7,10 +7,19 @@ const NAV: NavItem[] = [{ href: "/staff", label: "Заявки", icon: "inbox" }
 
 export default async function StaffLayout({ children }: LayoutProps<"/">) {
   const ctx = await requireStaff();
-  const profile = await getMyStaffProfile(ctx);
+  const p = await getMyStaffProfile(ctx);
+  const [lastName = "", firstName = ""] = p.fullName.split(" ");
 
   return (
-    <AppShell nav={NAV} homeHref="/staff" userLabel={`${profile.fullName} · деканат ${profile.faculty.short}`}>
+    <AppShell
+      nav={NAV}
+      homeHref="/staff"
+      user={{
+        name: `${firstName} ${lastName}`.trim(),
+        meta: `Деканат ${p.faculty.short}`,
+        initials: `${firstName[0] ?? ""}${lastName[0] ?? ""}`,
+      }}
+    >
       {children}
     </AppShell>
   );

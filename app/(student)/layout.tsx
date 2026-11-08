@@ -14,10 +14,18 @@ export default async function StudentLayout({ children }: LayoutProps<"/">) {
   // Защита всего раздела. Каждая страница и действие дополнительно
   // вызывает requireStudent() сама — layout не защищает серверные действия.
   const ctx = await requireStudent();
-  const profile = await getMyStudentProfile(ctx);
+  const p = await getMyStudentProfile(ctx);
 
   return (
-    <AppShell nav={NAV} homeHref="/today" userLabel={`${profile.firstName} ${profile.lastName} · ${profile.group.name}`}>
+    <AppShell
+      nav={NAV}
+      homeHref="/today"
+      user={{
+        name: `${p.firstName} ${p.lastName}`,
+        meta: `${p.group.program.faculty.short} · ${p.group.course} курс · ${p.group.name}`,
+        initials: `${p.firstName[0]}${p.lastName[0]}`,
+      }}
+    >
       {children}
     </AppShell>
   );

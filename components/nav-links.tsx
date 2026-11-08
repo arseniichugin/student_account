@@ -10,31 +10,42 @@ const ICONS = { sun: Sun, file: FileText, user: UserRound, inbox: Inbox, calenda
 
 export type NavItem = { href: string; label: string; icon: keyof typeof ICONS };
 
-export function NavLinks({ items, variant }: { items: NavItem[]; variant: "top" | "bottom" }) {
+const STYLES = {
+  bottom: {
+    list: "flex",
+    item: "flex-1",
+    link: "flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-medium",
+    active: "text-primary",
+    idle: "text-muted hover:text-text",
+    icon: "size-6",
+  },
+  side: {
+    list: "flex flex-col gap-1",
+    item: "",
+    link: "flex min-h-11 items-center gap-3 rounded-xl px-3 text-[15px] font-medium",
+    active: "bg-primary-soft text-primary",
+    idle: "text-muted hover:bg-surface-muted hover:text-text",
+    icon: "size-5",
+  },
+} as const;
+
+export function NavLinks({ items, variant }: { items: NavItem[]; variant: keyof typeof STYLES }) {
   const pathname = usePathname();
+  const s = STYLES[variant];
 
   return (
-    <ul className={cn(variant === "bottom" ? "flex" : "flex gap-1")}>
+    <ul className={s.list}>
       {items.map(({ href, label, icon }) => {
         const Icon = ICONS[icon];
         const active = pathname === href || pathname.startsWith(href + "/");
         return (
-          <li key={href} className={cn(variant === "bottom" && "flex-1")}>
+          <li key={href} className={s.item}>
             <Link
               href={href}
               aria-current={active ? "page" : undefined}
-              className={cn(
-                variant === "bottom"
-                  ? "flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-medium"
-                  : "flex min-h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium",
-                active
-                  ? variant === "bottom"
-                    ? "text-primary"
-                    : "bg-primary-soft text-primary"
-                  : "text-muted hover:text-text",
-              )}
+              className={cn(s.link, active ? s.active : s.idle)}
             >
-              <Icon className={variant === "bottom" ? "size-6" : "size-4"} aria-hidden />
+              <Icon className={s.icon} aria-hidden />
               {label}
             </Link>
           </li>

@@ -44,8 +44,18 @@ services:
     environment:
       DATABASE_URL: postgresql://student_account:${POSTGRES_PASSWORD}@db:5432/student_account
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      # Публичный стенд: демо-аккаунты общие, смена пароля отключена.
+      DEMO_MODE: ${DEMO_MODE:-1}
+      # Приложение доступно только через прокси (Caddy/nginx) на этом же сервере,
+      # который выставляет X-Real-IP, поэтому этому заголовку можно верить.
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      # Ограничение памяти Node.js: без него под нагрузкой процесс занимает ~800 МБ
+      # (замер 8 ноября, docs/DEPLOYMENT.md). 512 МБ хватает с запасом.
+      NODE_OPTIONS: --max-old-space-size=512
     ports:
-      - "${APP_PORT:-3000}:3000"
+      # Только 127.0.0.1: снаружи приложение доступно лишь через HTTPS-прокси.
+      # (Docker обходит правила ufw, поэтому открытый порт был бы виден из интернета.)
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
     depends_on:
       db:
         condition: service_healthy
