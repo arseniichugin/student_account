@@ -155,6 +155,17 @@
 
 ## 🚀 Запуск проекта
 
+### Посмотреть без установки — GitHub Codespaces
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/arseniichugin/student_account?quickstart=1)
+
+Кабинет запускается на виртуальной машине GitHub прямо в браузере — ничего не нужно скачивать.
+Нажмите кнопку выше (или **Code → Codespaces → Create codespace on main**), подождите 3–5 минут — кабинет
+откроется в новой вкладке. Подробности — [`.devcontainer/README.md`](.devcontainer/README.md).
+Не забудьте остановить Codespace после работы: он расходует бесплатную месячную квоту GitHub.
+
+### На своём компьютере
+
 Нужны **Git**, **Node.js 22+** и **Docker Desktop** (для базы данных).
 
 **1. Скачать проект и установить зависимости**

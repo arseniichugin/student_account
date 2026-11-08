@@ -7,6 +7,13 @@ const nextConfig: NextConfig = {
   // Для Docker собираем автономный сервер (см. Dockerfile).
   output: process.env.BUILD_STANDALONE === "1" ? "standalone" : undefined,
   poweredByHeader: false,
+  // Дополнительные адреса, с которых можно отправлять формы (серверные действия).
+  // Нужно только за чужим прокси, который подменяет адрес (GitHub Codespaces —
+  // см. .devcontainer/devcontainer.json). На боевом сервере переменная не задаётся,
+  // и действует строгая проверка: только тот же адрес (защита от CSRF).
+  experimental: process.env.SERVER_ACTIONS_ALLOWED_ORIGINS
+    ? { serverActions: { allowedOrigins: process.env.SERVER_ACTIONS_ALLOWED_ORIGINS.split(",") } }
+    : undefined,
   turbopack: {
     rules: {
       "*.css": {

@@ -1,0 +1,34 @@
+// Конфигурация для GitHub Codespaces: кабинет запускается в браузере без установки программ.
+// Как открыть: на странице репозитория Code → Codespaces → Create codespace on main.
+{
+  "name": "Горизонт · цифровой деканат",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "shutdownAction": "stopCompose",
+
+  "hostRequirements": { "cpus": 2, "memory": "4gb" },
+
+  "containerEnv": {
+    // Codespaces открывает сайт по адресу *.app.github.dev, а сервер видит localhost:3000.
+    // Без этой строки Next.js отклонял бы отправку форм как подозрительную (защита от CSRF).
+    "SERVER_ACTIONS_ALLOWED_ORIGINS": "*.app.github.dev"
+  },
+
+  // Один раз при создании: зависимости, база с демо-данными, сборка.
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  // При каждом открытии: запуск кабинета в отдельном терминале.
+  "postAttachCommand": { "кабинет": "bash .devcontainer/start.sh" },
+
+  "forwardPorts": [3000],
+  "portsAttributes": {
+    "3000": { "label": "Кабинет", "onAutoForward": "openBrowser" }
+  },
+
+  "customizations": {
+    "codespaces": { "openFiles": [".devcontainer/README.md"] },
+    "vscode": {
+      "extensions": ["Prisma.prisma", "bradlc.vscode-tailwindcss", "dbaeumer.vscode-eslint"]
+    }
+  }
+}

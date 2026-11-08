@@ -1,0 +1,23 @@
+# Окружение для GitHub Codespaces: контейнер с Node.js + PostgreSQL.
+# Пароль базы — только для этой учебной виртуальной машины, база не видна из интернета.
+services:
+  app:
+    image: mcr.microsoft.com/devcontainers/javascript-node:22-bookworm
+    volumes:
+      - ../..:/workspaces:cached
+    command: sleep infinity
+    # Общая сеть с базой: приложение видит её как localhost:5432, как и при обычной разработке.
+    network_mode: service:db
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: student_account
+      POSTGRES_PASSWORD: dev_password
+      POSTGRES_DB: student_account
+    volumes:
+      - devcontainer-db:/var/lib/postgresql/data
+
+volumes:
+  devcontainer-db:
