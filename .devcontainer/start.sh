@@ -30,4 +30,11 @@ echo " Обновить без перезапуска Codespace: Ctrl+C здес
 echo "   bash .devcontainer/start.sh"
 echo "=================================================================="
 echo ""
+# Если кабинет уже запущен (например, в другом терминале), останавливаем старый сервер —
+# иначе новый не сможет занять порт 3000 (ошибка EADDRINUSE).
+if pkill -f "next-server|\.bin/next start" 2>/dev/null; then
+  echo "▶ Остановлен ранее запущенный сервер"
+  sleep 1
+fi
+
 exec npm start
