@@ -9,11 +9,8 @@
 
   "hostRequirements": { "cpus": 2, "memory": "4gb" },
 
-  "containerEnv": {
-    // Codespaces открывает сайт по адресу *.app.github.dev, а сервер видит localhost:3000.
-    // Без этой строки Next.js отклонял бы отправку форм как подозрительную (защита от CSRF).
-    "SERVER_ACTIONS_ALLOWED_ORIGINS": "*.app.github.dev"
-  },
+  // Переменная SERVER_ACTIONS_ALLOWED_ORIGINS задаётся в docker-compose.yml и start.sh:
+  // containerEnv в конфигурации с Docker Compose до сервера не доходил (вход падал с ошибкой).
 
   // Один раз при создании: зависимости, база с демо-данными, сборка.
   "postCreateCommand": "bash .devcontainer/setup.sh",
