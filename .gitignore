@@ -40,3 +40,4 @@ Thumbs.db
 # прочее
 *.pem
 .vercel
+lib/generated/

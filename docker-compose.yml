@@ -1,0 +1,54 @@
+# Локально:   docker compose up -d db          — только база, приложение через npm run dev
+# На сервере: docker compose run --rm migrate  — миграции + демо-данные (один раз)
+#             docker compose up -d app         — приложение и база
+#
+# Пароль базы берётся из файла .env (POSTGRES_PASSWORD) и не хранится в репозитории.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: student_account
+      POSTGRES_DB: student_account
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Задайте POSTGRES_PASSWORD в файле .env}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    ports:
+      # Только для этого компьютера: база не видна из интернета.
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U student_account -d student_account"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      target: build
+    profiles: ["tools"]
+    command: npm run db:setup
+    environment:
+      DATABASE_URL: postgresql://student_account:${POSTGRES_PASSWORD}@db:5432/student_account
+      SEED_DEMO_PASSWORD: ${SEED_DEMO_PASSWORD:-}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    build:
+      context: .
+      target: runner
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://student_account:${POSTGRES_PASSWORD}@db:5432/student_account
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db-data:

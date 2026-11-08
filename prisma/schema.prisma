@@ -1,0 +1,274 @@
+// Схема базы данных «Цифрового деканата».
+// Все данные в базе — вымышленные (см. prisma/seed.ts).
+// Описание сущностей и правил доступа — docs/ARCHITECTURE.md.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Пользователи и вход ────────────────────────────────────────────
+
+enum Role {
+  STUDENT
+  STAFF
+}
+
+model User {
+  id           String   @id @default(cuid())
+  login        String   @unique
+  /// Хеш argon2id. Пароль в открытом виде нигде не хранится.
+  passwordHash String
+  role         Role
+  createdAt    DateTime @default(now())
+
+  student       Student?
+  staff         Staff?
+  sessions      Session[]
+  notifications Notification[]
+  announcements Announcement[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  /// SHA-256 от токена из cookie. Сам токен в базе не хранится.
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+/// Журнал попыток входа — для защиты от подбора пароля.
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  login     String
+  ip        String
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([login, createdAt])
+  @@index([ip, createdAt])
+}
+
+// ─── Структура вуза ─────────────────────────────────────────────────
+
+model Faculty {
+  id       String    @id @default(cuid())
+  name     String    @unique
+  /// Короткое название: «ФИТ»
+  short    String
+  programs Program[]
+  staff    Staff[]
+}
+
+/// Направление подготовки
+model Program {
+  id        String  @id @default(cuid())
+  code      String
+  name      String
+  facultyId String
+  faculty   Faculty @relation(fields: [facultyId], references: [id])
+  groups    Group[]
+}
+
+model Group {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  course    Int
+  programId String
+  program   Program    @relation(fields: [programId], references: [id])
+  students  Student[]
+  lessons   Lesson[]
+  deadlines Deadline[]
+}
+
+model Student {
+  id           String    @id @default(cuid())
+  userId       String    @unique
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  groupId      String
+  group        Group     @relation(fields: [groupId], references: [id])
+  lastName     String
+  firstName    String
+  middleName   String?
+  /// Номер зачётной книжки (вымышленный)
+  recordBookNo String    @unique
+  grades       Grade[]
+  requests     Request[]
+}
+
+model Staff {
+  id        String  @id @default(cuid())
+  userId    String  @unique
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  facultyId String
+  faculty   Faculty @relation(fields: [facultyId], references: [id])
+  fullName  String
+  position  String
+}
+
+model Teacher {
+  id       String   @id @default(cuid())
+  fullName String
+  lessons  Lesson[]
+}
+
+model Subject {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  lessons   Lesson[]
+  grades    Grade[]
+  deadlines Deadline[]
+}
+
+// ─── Расписание ─────────────────────────────────────────────────────
+
+enum LessonType {
+  LECTURE
+  SEMINAR
+  LAB
+}
+
+enum LessonStatus {
+  NORMAL
+  MOVED
+  CANCELLED
+}
+
+model Lesson {
+  id               String       @id @default(cuid())
+  groupId          String
+  group            Group        @relation(fields: [groupId], references: [id])
+  subjectId        String
+  subject          Subject      @relation(fields: [subjectId], references: [id])
+  teacherId        String
+  teacher          Teacher      @relation(fields: [teacherId], references: [id])
+  type             LessonType
+  room             String
+  startsAt         DateTime
+  endsAt           DateTime
+  status           LessonStatus @default(NORMAL)
+  /// Для переносов: как было до изменения
+  originalStartsAt DateTime?
+  originalRoom     String?
+
+  @@index([groupId, startsAt])
+}
+
+model Deadline {
+  id        String   @id @default(cuid())
+  groupId   String
+  group     Group    @relation(fields: [groupId], references: [id])
+  subjectId String?
+  subject   Subject? @relation(fields: [subjectId], references: [id])
+  title     String
+  dueAt     DateTime
+
+  @@index([groupId, dueAt])
+}
+
+// ─── Успеваемость ───────────────────────────────────────────────────
+
+enum GradeKind {
+  EXAM
+  CREDIT
+  COURSEWORK
+  MIDTERM
+}
+
+model Grade {
+  id        String    @id @default(cuid())
+  studentId String
+  student   Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subjectId String
+  subject   Subject   @relation(fields: [subjectId], references: [id])
+  semester  Int
+  kind      GradeKind
+  /// Для экзамена: «2»–«5». Для зачёта: «зачтено» / «не зачтено». Пусто — ещё не сдано.
+  value     String?
+  date      DateTime?
+
+  @@index([studentId, semester])
+}
+
+// ─── Заявки и справки ───────────────────────────────────────────────
+
+enum RequestStatus {
+  SUBMITTED
+  IN_PROGRESS
+  READY
+  ISSUED
+  REJECTED
+}
+
+model RequestType {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  name        String
+  description String
+  /// Примерный срок готовности в рабочих днях
+  etaDays     Int
+  requests    Request[]
+}
+
+model Request {
+  id           String        @id @default(cuid())
+  studentId    String
+  student      Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  typeId       String
+  type         RequestType   @relation(fields: [typeId], references: [id])
+  /// Поля формы: куда предоставить справку, количество экземпляров и т. п.
+  payload      Json
+  status       RequestStatus @default(SUBMITTED)
+  staffComment String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([studentId, createdAt])
+  @@index([status])
+}
+
+// ─── Объявления и уведомления ───────────────────────────────────────
+
+model Announcement {
+  id          String   @id @default(cuid())
+  authorId    String
+  author      User     @relation(fields: [authorId], references: [id])
+  title       String
+  body        String
+  /// Аудитория: если поле пустое — для всех. Иначе — только для факультета / курса / группы.
+  facultyId   String?
+  course      Int?
+  groupId     String?
+  publishedAt DateTime @default(now())
+
+  @@index([publishedAt])
+}
+
+enum NotificationType {
+  ANNOUNCEMENT
+  SCHEDULE_CHANGE
+  REQUEST_STATUS
+  DEADLINE
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  body      String
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([userId, createdAt])
+}

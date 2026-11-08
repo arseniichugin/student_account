@@ -6,7 +6,8 @@
 ## О проекте
 
 **«Цифровой деканат будущего»** — прототип личного кабинета студента для конкурса.
-Это концепт, а не официальный сервис вуза. Срок работы прототипа — до 28 ноября 2026.
+Вуз вымышленный: **Университет «Горизонт»** (факультеты ФИТ и ЭФ).
+Это концепт, а не официальный сервис вуза. **Дедлайн сдачи — 22 ноября 2026**, прототип должен работать до 28 ноября.
 
 Подробности — в `docs/`:
 
@@ -21,9 +22,24 @@
 
 ## Стек
 
-Next.js (App Router) + TypeScript · Tailwind CSS + shadcn/ui · PostgreSQL + Prisma ·
-сессии в `httpOnly` cookie · argon2 · Docker · VPS в российском облаке.
+Next.js 16 (App Router) + TypeScript · React 19 · Tailwind CSS 4 · PostgreSQL 16 + Prisma 7 ·
+сессии в `httpOnly` cookie · argon2id · Zod · Vitest · Docker Compose · VPS в российском облаке.
 Не добавляй новые крупные зависимости без объяснения, зачем они нужны.
+
+### Особенности версий (важно — отличаются от старых примеров в интернете)
+
+- **Next.js 16** сильно отличается от 13–15. Перед работой с незнакомым API читай документацию
+  в `node_modules/next/dist/docs/` (см. `AGENTS.md`). Middleware называется `proxy.ts`.
+- **`cacheComponents` выключен намеренно** (`next.config.ts`): все страницы кабинета зависят
+  от сессии. Не включай и не используй `"use cache"` без обсуждения.
+- **`params` и `searchParams` — промисы**: `const { id } = await params`. Типы страниц —
+  глобальные `PageProps<"/путь">` и `LayoutProps<"/">`.
+- **Prisma 7**: настройки подключения — в `prisma.config.ts`, а не в `schema.prisma`.
+  Клиент генерируется в `lib/generated/prisma` (не коммитится), импорт —
+  `@/lib/generated/prisma/client`, перечисления для клиентских компонентов — `@/lib/generated/prisma/enums`.
+- **React 19 и формы**: `<form action={...}>` после отправки сбрасывает поля к начальным значениям.
+  Для форм, где после сохранения поля должны показывать новые значения, используй
+  `onSubmit` + `startTransition(() => formAction(formData))` (пример — `app/(staff)/staff/status-form.tsx`).
 
 ## Язык
 
@@ -69,9 +85,43 @@ Next.js (App Router) + TypeScript · Tailwind CSS + shadcn/ui · PostgreSQL + Pr
    Для изменений интерфейса — `ui-reviewer`.
 6. Добавь запись в `docs/AI_LOG.md` (шаблон внутри файла) и отметь прогресс в `docs/ROADMAP.md`.
 
+## Где что лежит
+
+```
+app/(auth)/login/        вход
+app/(student)/           кабинет студента (layout проверяет requireStudent)
+app/(staff)/staff/       кабинет сотрудника деканата (requireStaff)
+lib/auth/                сессии, пароли, ограничение попыток, guards, серверные действия входа
+lib/data/                ЕДИНСТВЕННОЕ место запросов к базе из страниц; всё фильтруется по контексту
+lib/validation/          схемы Zod
+components/ui/           базовые компоненты (Button, Input, Card…)
+prisma/schema.prisma     схема базы; prisma/seed.ts — вымышленные данные
+tests/                   автотесты безопасности (Vitest)
+```
+
+Новые запросы к данным — **только** в `lib/data/*`, функция принимает `StudentContext` или
+`StaffContext` из `lib/auth/guards.ts`, а не голый id.
+
 ## Команды
 
-> Появятся на этапе 2, когда будет создан проект.
+| Команда | Что делает |
+|---|---|
+| `docker compose up -d db` | Поднять PostgreSQL локально |
+| `npm run db:setup` | Миграции + демо-данные |
+| `npm run dev` | Режим разработки, http://localhost:3000 |
+| `npm run db:migrate -- --name <имя>` | Новая миграция после правки `schema.prisma` |
+| `npm run db:seed` | Пересоздать демо-данные |
+| `npm run lint` · `npm run typecheck` · `npm test` | Проверки — запускать перед каждым коммитом |
+| `npm run build` | Продакшен-сборка |
+
+Демо-аккаунты: `dima.sokolov`, `timur.kim`, `anna.belova`, `dekanat.fit`, `dekanat.ef`, пароль `Gorizont2026`.
+
+## Проверка в браузере
+
+Для проверки интерфейса используй Playwright (уже установлен в облачном окружении):
+ширина 360 px, вход под демо-аккаунтом, скриншоты — в `docs/screenshots/` по правилам из README папки.
+Перед запуском продакшен-сервера убедись, что старый процесс на порту 3000 остановлен,
+иначе браузер получит файлы от предыдущей сборки.
 
 ## Git
 
