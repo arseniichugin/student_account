@@ -7,7 +7,9 @@ cd "$(dirname "$0")/.."
 # (откуда отправлена форма) подменяет на localhost:3000. Next.js видит несовпадение и отклоняет
 # отправку форм (вход!) как поддельный запрос (CSRF) — «This page couldn't load».
 # Разрешаем оба адреса. Задаём здесь, при запуске, — так переменная точно дойдёт до сервера.
-export SERVER_ACTIONS_ALLOWED_ORIGINS="${SERVER_ACTIONS_ALLOWED_ORIGINS:-*.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev},localhost:3000}"
+# Значение задаётся всегда, а не «если не задано»: в контейнере может остаться старое
+# неполное значение из прежней версии настройки (так и было — вход продолжал падать).
+export SERVER_ACTIONS_ALLOWED_ORIGINS="*.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev},localhost:3000"
 
 # Обновляемся, только если вы ничего не меняли в файлах сами — чтобы не потерять ваши правки.
 if [ -z "$(git status --porcelain)" ]; then
