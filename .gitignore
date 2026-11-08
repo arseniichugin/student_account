@@ -44,3 +44,7 @@ lib/generated/
 
 # состояние Codespaces (что уже установлено/собрано)
 .devcontainer/.state/
+
+# Python
+__pycache__/
+*.pyc

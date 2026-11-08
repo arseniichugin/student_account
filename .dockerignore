@@ -9,3 +9,5 @@ docs
 tests
 coverage
 *.log
+# наборы данных и генераторы (в сборку кабинета не нужны)
+schedule
