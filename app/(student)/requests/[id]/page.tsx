@@ -8,7 +8,7 @@ import { Card, CardTitle } from "@/components/ui/card";
 import { DetailsList } from "@/components/ui/details-list";
 import { requireStudent } from "@/lib/auth/guards";
 import { getMyRequest } from "@/lib/data/requests";
-import { formatDateTime } from "@/lib/utils";
+import { formatDateTime, workDays } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Заявка" };
 
@@ -31,7 +31,7 @@ export default async function RequestPage({ params, searchParams }: PageProps<"/
   if (payload.destination) details.push(["Куда", payload.destination]);
   if (payload.copies) details.push(["Экземпляров", String(payload.copies)]);
   if (payload.comment) details.push(["Ваш комментарий", payload.comment]);
-  details.push(["Срок готовности", `обычно ${request.type.etaDays} раб. дн.`]);
+  details.push(["Срок готовности", `обычно ${workDays(request.type.etaDays)}`]);
 
   return (
     <div className="space-y-4 lg:space-y-5">
@@ -51,7 +51,7 @@ export default async function RequestPage({ params, searchParams }: PageProps<"/
         <StatusBadge status={request.status} className="text-sm" />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-6">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:gap-6">
         <div className="space-y-4">
           {request.staffComment && (
             <Card
@@ -69,7 +69,7 @@ export default async function RequestPage({ params, searchParams }: PageProps<"/
           </Card>
         </div>
 
-        <Card className="self-start">
+        <Card className="order-first self-start xl:order-none">
           <CardTitle className="mb-4 text-[15px]">Где сейчас заявка</CardTitle>
           <StatusTimeline status={request.status} />
         </Card>

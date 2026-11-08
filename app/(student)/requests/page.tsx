@@ -30,12 +30,12 @@ export default async function RequestsPage() {
         <Link href="/requests/new" className={buttonVariants()}>
           <FilePlus2 className="size-4" aria-hidden />
           <span>
-            Новая<span className="hidden sm:inline"> заявка</span>
+            Новая<span className="sr-only sm:not-sr-only"> заявка</span>
           </span>
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_300px] lg:gap-6">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_300px] xl:gap-6">
         {requests.length === 0 ? (
           <Card className="flex flex-col items-center py-12 text-center">
             <FileText className="size-10 text-muted" aria-hidden />
@@ -48,9 +48,9 @@ export default async function RequestsPage() {
             </Link>
           </Card>
         ) : (
-          <Card className="self-start p-0 sm:p-0">
-            {/* Заголовки колонок — только на широком экране */}
-            <div className="hidden grid-cols-[minmax(0,1fr)_140px_120px_20px] gap-4 border-b border-border px-5 py-3 text-xs font-medium tracking-wide text-muted uppercase md:grid">
+          <Card className="@container self-start p-0 sm:p-0">
+            {/* Таблица — когда широка сама карточка (container query), а не экран */}
+            <div className="hidden grid-cols-[minmax(0,1fr)_140px_120px_20px] gap-4 border-b border-border px-5 py-3 text-xs font-medium tracking-wide text-muted uppercase @xl:grid">
               <span>Документ</span>
               <span>Подана</span>
               <span>Статус</span>
@@ -61,13 +61,13 @@ export default async function RequestsPage() {
                 <li key={r.id}>
                   <Link
                     href={`/requests/${r.id}`}
-                    className="flex items-center gap-3 px-4 py-3.5 hover:bg-surface-muted sm:px-5 md:grid md:grid-cols-[minmax(0,1fr)_140px_120px_20px] md:gap-4"
+                    className="flex items-center gap-3 px-4 py-3.5 hover:bg-surface-muted sm:px-5 @xl:grid @xl:grid-cols-[minmax(0,1fr)_140px_120px_20px] @xl:gap-4"
                   >
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[15px] font-medium">{r.type.name}</span>
-                      <span className="block text-xs text-muted md:hidden">от {formatDate(r.createdAt)}</span>
+                      <span className="block text-[15px] font-medium @xl:truncate">{r.type.name}</span>
+                      <span className="block text-xs text-muted @xl:hidden">от {formatDate(r.createdAt)}</span>
                     </span>
-                    <span className="hidden text-sm text-muted md:block">{formatDate(r.createdAt)}</span>
+                    <span className="hidden text-sm text-muted @xl:block">{formatDate(r.createdAt)}</span>
                     <span>
                       <StatusBadge status={r.status} />
                     </span>

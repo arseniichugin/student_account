@@ -19,7 +19,7 @@ export default async function NewRequestPage() {
       </Link>
       <h1 className="text-[28px] leading-tight font-bold lg:text-[32px]">Новая заявка</h1>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_300px] lg:gap-6">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_300px] xl:gap-6">
         <Card>
           <NewRequestForm types={types} />
         </Card>

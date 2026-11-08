@@ -4,6 +4,7 @@ import { ConceptBadge } from "@/components/concept-badge";
 import { Logo } from "@/components/logo";
 import { NavLinks, type NavItem } from "@/components/nav-links";
 import { logoutAction } from "@/lib/auth/actions";
+import { cn } from "@/lib/utils";
 
 export type ShellUser = { name: string; meta: string; initials: string };
 
@@ -23,12 +24,13 @@ export function AppShell({
   homeHref: string;
   children: React.ReactNode;
 }) {
+  const showBottomNav = nav.length > 1;
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[264px_minmax(0,1fr)]">
       {/* Боковое меню — только на компьютере. Фон на всю высоту колонки, меню «прилипает» к экрану. */}
       <div className="hidden border-r border-border bg-surface lg:block">
         <aside className="sticky top-0 flex h-dvh flex-col px-4 py-5">
-          <Link href={homeHref} aria-label="На главную" className="px-2">
+          <Link href={homeHref} aria-label="Горизонт — на главную" className="inline-flex min-h-11 items-center px-2">
             <Logo />
           </Link>
           <ConceptBadge className="mx-2 mt-3 self-start" />
@@ -51,18 +53,16 @@ export function AppShell({
         </aside>
       </div>
 
-      <div className="min-w-0 pb-20 lg:pb-0">
+      <div className={cn("min-w-0 lg:pb-0", showBottomNav && "pb-20")}>
         {/* Шапка — телефон и планшет */}
         <header className="sticky top-0 z-20 border-b border-border bg-bg/90 backdrop-blur lg:hidden">
           <div className="mx-auto flex h-14 max-w-3xl items-center gap-3 px-4">
-            <Link href={homeHref} aria-label="На главную">
+            <Link href={homeHref} aria-label="Горизонт — на главную" className="inline-flex min-h-11 items-center">
               <Logo />
             </Link>
             <ConceptBadge className="hidden sm:inline-flex" />
             <div className="ml-auto flex items-center gap-1">
-              <span className="hidden max-w-56 truncate text-sm text-muted md:block">
-                {user.name} · {user.meta}
-              </span>
+              <span className="hidden max-w-56 truncate text-sm text-muted md:block">{user.name}</span>
               <LogoutButton />
             </div>
           </div>
@@ -74,13 +74,15 @@ export function AppShell({
         <main className="mx-auto max-w-3xl px-4 py-5 sm:py-8 lg:max-w-6xl lg:px-10 lg:py-10">{children}</main>
       </div>
 
-      {/* Нижняя навигация — телефон и планшет */}
-      <nav
-        className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
-        aria-label="Основная навигация"
-      >
-        <NavLinks items={nav} variant="bottom" />
-      </nav>
+      {/* Нижняя навигация — телефон и планшет; из одного пункта она бесполезна */}
+      {showBottomNav && (
+        <nav
+          className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
+          aria-label="Основная навигация"
+        >
+          <NavLinks items={nav} variant="bottom" />
+        </nav>
+      )}
     </div>
   );
 }

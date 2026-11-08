@@ -61,7 +61,7 @@ function Step({
           state === "done" && "border-primary bg-primary text-on-primary",
           state === "current" && "border-primary bg-primary-soft",
           state === "todo" && "border-border bg-surface",
-          state === "rejected" && "border-danger bg-danger text-white",
+          state === "rejected" && "border-danger bg-danger text-on-primary",
         )}
         aria-hidden
       >
@@ -72,7 +72,9 @@ function Step({
       <span className="pt-0.5">
         <span className={cn("block text-[15px] font-medium", state === "todo" && "text-muted")}>
           {label}
-          {state === "current" && <span className="sr-only"> — текущий этап</span>}
+          <span className="sr-only">
+            {state === "current" ? " — текущий этап" : state === "done" ? " — пройден" : state === "todo" ? " — впереди" : ""}
+          </span>
         </span>
         <span className="block text-sm text-muted">{hint}</span>
       </span>

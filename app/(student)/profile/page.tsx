@@ -17,7 +17,7 @@ export default async function ProfilePage() {
     <div className="space-y-5">
       <h1 className="text-[28px] leading-tight font-bold lg:text-[32px]">Профиль</h1>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-6">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px] xl:gap-6">
         <Card>
           <div className="flex items-center gap-4">
             <div

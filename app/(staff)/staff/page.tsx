@@ -53,7 +53,7 @@ export default async function StaffRequestsPage({ searchParams }: PageProps<"/st
                   href={f.value ? `/staff?status=${f.value}` : "/staff"}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "inline-flex min-h-10 items-center gap-1.5 rounded-full px-3.5 text-sm font-medium whitespace-nowrap",
+                    "inline-flex min-h-11 items-center gap-1.5 rounded-full px-3.5 text-sm font-medium whitespace-nowrap",
                     active ? "bg-primary text-on-primary" : "bg-surface-muted text-muted hover:text-text",
                   )}
                 >
@@ -61,7 +61,7 @@ export default async function StaffRequestsPage({ searchParams }: PageProps<"/st
                   <span
                     className={cn(
                       "min-w-5 rounded-full px-1.5 text-center text-xs",
-                      active ? "bg-white/20" : "bg-border/70",
+                      active ? "bg-black/15" : "bg-border/70",
                     )}
                   >
                     {count}
@@ -78,6 +78,11 @@ export default async function StaffRequestsPage({ searchParams }: PageProps<"/st
           <Inbox className="size-10 text-muted" aria-hidden />
           <p className="mt-3 text-[17px] font-semibold">Заявок нет</p>
           <p className="mt-1 text-sm text-muted">В этой категории пока пусто.</p>
+          {status && (
+            <Link href="/staff" className="mt-4 inline-flex min-h-11 items-center text-sm font-medium text-primary">
+              Показать все заявки
+            </Link>
+          )}
         </Card>
       ) : (
         <ul className="space-y-3">
@@ -87,10 +92,11 @@ export default async function StaffRequestsPage({ searchParams }: PageProps<"/st
             return (
               <li key={r.id}>
                 {/* Компьютер: сведения слева, обработка справа. Телефон: друг под другом. */}
-                <Card className="lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,460px)] lg:items-start lg:gap-8">
+                <Card className="@container">
+                  <div className="@3xl:grid @3xl:grid-cols-[minmax(0,1fr)_minmax(0,440px)] @3xl:items-start @3xl:gap-8">
                   <div>
                     <div className="flex flex-wrap items-start justify-between gap-2">
-                      <p className="text-[15px] font-semibold">{r.type.name}</p>
+                      <h2 className="text-[15px] font-semibold">{r.type.name}</h2>
                       <StatusBadge status={r.status} />
                     </div>
                     <p className="mt-0.5 text-sm">
@@ -103,7 +109,8 @@ export default async function StaffRequestsPage({ searchParams }: PageProps<"/st
                     </p>
                     {payload.comment && <p className="mt-1 text-sm">«{payload.comment}»</p>}
                   </div>
-                  <StatusForm requestId={r.id} status={r.status} comment={r.staffComment ?? ""} />
+                  <StatusForm requestId={r.id} status={r.status} comment={r.staffComment ?? ""} title={r.type.name} />
+                  </div>
                 </Card>
               </li>
             );

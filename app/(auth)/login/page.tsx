@@ -31,7 +31,7 @@ export default async function LoginPage() {
           <span className="text-lg font-semibold">Горизонт · цифровой деканат</span>
         </div>
         <div className="relative my-auto max-w-md py-12">
-          <h2 className="text-4xl leading-tight font-bold">Вся учёба — в одном месте</h2>
+          <p className="text-4xl leading-tight font-bold">Вся учёба — в одном месте</p>
           <ul className="mt-10 space-y-6">
             {FEATURES.map(({ Icon, title, text }) => (
               <li key={title} className="flex gap-4">
@@ -40,13 +40,13 @@ export default async function LoginPage() {
                 </span>
                 <span>
                   <span className="block font-semibold">{title}</span>
-                  <span className="block text-[15px] opacity-80">{text}</span>
+                  <span className="block text-[15px]">{text}</span>
                 </span>
               </li>
             ))}
           </ul>
         </div>
-        <p className="relative max-w-md text-xs leading-relaxed opacity-70">{DISCLAIMER}</p>
+        <p className="relative max-w-md text-[13px] leading-relaxed">{DISCLAIMER}</p>
       </section>
 
       {/* Правая половина — форма */}
@@ -76,7 +76,7 @@ export default async function LoginPage() {
 function HorizonArt() {
   return (
     <svg
-      className="pointer-events-none absolute -right-24 -bottom-24 h-[420px] w-[620px] opacity-[0.12]"
+      className="pointer-events-none absolute -right-40 -bottom-32 h-[420px] w-[620px] opacity-[0.08]"
       viewBox="0 0 620 420"
       aria-hidden
     >
