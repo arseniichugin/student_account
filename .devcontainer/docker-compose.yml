@@ -8,7 +8,7 @@ services:
     command: sleep infinity
     environment:
       # См. комментарий в start.sh: адрес Codespaces отличается от адреса сервера.
-      SERVER_ACTIONS_ALLOWED_ORIGINS: "*.app.github.dev"
+      SERVER_ACTIONS_ALLOWED_ORIGINS: "*.app.github.dev,localhost:3000"
     # Общая сеть с базой: приложение видит её как localhost:5432, как и при обычной разработке.
     network_mode: service:db
 

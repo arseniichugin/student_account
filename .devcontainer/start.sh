@@ -3,11 +3,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Codespaces открывает сайт по адресу *.app.github.dev, а сервер видит localhost:3000.
-# Без этой переменной Next.js отклоняет отправку форм (вход!) как поддельный запрос (CSRF)
-# и показывает «This page couldn't load». Задаём её здесь, при запуске, — так она точно
-# дойдёт до сервера (через containerEnv в Codespaces с Docker Compose она не доходила).
-export SERVER_ACTIONS_ALLOWED_ORIGINS="${SERVER_ACTIONS_ALLOWED_ORIGINS:-*.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev}}"
+# Прокси Codespaces передаёт серверу публичный адрес *.app.github.dev, а заголовок Origin
+# (откуда отправлена форма) подменяет на localhost:3000. Next.js видит несовпадение и отклоняет
+# отправку форм (вход!) как поддельный запрос (CSRF) — «This page couldn't load».
+# Разрешаем оба адреса. Задаём здесь, при запуске, — так переменная точно дойдёт до сервера.
+export SERVER_ACTIONS_ALLOWED_ORIGINS="${SERVER_ACTIONS_ALLOWED_ORIGINS:-*.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev},localhost:3000}"
 
 # Обновляемся, только если вы ничего не меняли в файлах сами — чтобы не потерять ваши правки.
 if [ -z "$(git status --porcelain)" ]; then
