@@ -143,7 +143,11 @@ async function main() {
     yearDisciplines.set(key, [...new Set([...(yearDisciplines.get(key) ?? []), ...disciplinesOf(g.id)])]);
   }
 
-  const testStudents = students.filter((s) => s.user.isDemo);
+  // Тестовые студенты — в том же порядке, в каком их выбирает импорт: факультет №1, №2, №3…
+  const facultyOrder = new Map(faculties.map((f, i) => [f.id, i]));
+  const testStudents = students
+    .filter((s) => s.user.isDemo)
+    .sort((a, b) => facultyOrder.get(a.facultyId)! - facultyOrder.get(b.facultyId)! || a.course - b.course);
   const staffUserByFaculty = new Map(faculties.map((f) => [f.id, f.staff[0]?.userId ?? null]));
 
   // ─── Очистка демо-контента ────────────────────────────────────────

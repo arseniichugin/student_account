@@ -40,7 +40,7 @@ async function snapshot() {
 
 describe("Повторный импорт", () => {
   it("идемпотентен: те же студенты и группы, заявки и оценки на месте, пароли не меняются", async () => {
-    const result = loadUniversityData(path.join(process.cwd(), "data/university"));
+    const result = loadUniversityData(path.resolve(process.env.UNIVERSITY_DATA_DIR || "data/university"));
     if (!result.ok) throw new Error("основной набор данных не проходит проверку");
 
     const before = await snapshot();
@@ -75,5 +75,36 @@ describe("Повторный импорт", () => {
     const table = parseCsv(text);
     expect(table.headers).toEqual(["Логин", "ФИО", "Email", "Роль", "Пароль"]);
     expect(table.records.map((r) => r.values[0]).sort()).toEqual(demo.map((u) => u.login).sort());
+  }, 180_000);
+
+  it("логины, почта и зачётки могут «переехать» между студентами — пароли остаются у аккаунтов", async () => {
+    const result = loadUniversityData(path.resolve(process.env.UNIVERSITY_DATA_DIR || "data/university"));
+    if (!result.ok) throw new Error("основной набор данных не проходит проверку");
+    const options = { demoPassword: process.env.DEMO_PASSWORD || DEFAULT_DEMO_PASSWORD, credentialsPath: path.join(tmp, "swap.csv") };
+    // Два обычных (не тестовых) студента меняются почтой и зачёткой
+    const demoLogins = new Set((await db.user.findMany({ where: { isDemo: true }, select: { login: true } })).map((u) => u.login));
+    const [a, b] = result.data.students.filter((s) => !demoLogins.has(s.login)).slice(10, 12);
+    const swapped = {
+      ...result.data,
+      students: result.data.students.map((s) =>
+        s === a ? { ...s, email: b!.email, login: b!.login, recordBookNo: b!.recordBookNo }
+        : s === b ? { ...s, email: a!.email, login: a!.login, recordBookNo: a!.recordBookNo }
+        : s,
+      ),
+    };
+    const userOf = (externalId: string) =>
+      db.user.findFirstOrThrow({ where: { student: { externalId } }, select: { id: true, login: true, passwordHash: true } });
+    const beforeA = await userOf(a!.externalId);
+
+    try {
+      await importUniversityData(db, swapped, options);
+      const afterA = await userOf(a!.externalId);
+      expect(afterA.login).toBe(b!.login);
+      expect(afterA.id).toBe(beforeA.id);
+      expect(afterA.passwordHash).toBe(beforeA.passwordHash);
+    } finally {
+      await importUniversityData(db, result.data, options);
+    }
+    expect(await userOf(a!.externalId)).toEqual(beforeA);
   }, 180_000);
 });

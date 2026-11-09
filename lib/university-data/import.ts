@@ -108,7 +108,9 @@ export async function importUniversityData(
   }
   const testLogins = new Set(testStudents.map((s) => s.login));
 
-  const existing = await db.student.findMany({ select: { id: true, externalId: true, userId: true } });
+  const existing = await db.student.findMany({
+    select: { id: true, externalId: true, userId: true, user: { select: { login: true } } },
+  });
   const existingByExt = new Map(existing.map((s) => [s.externalId, s]));
   const newStudents = data.students.filter((s) => !existingByExt.has(s.externalId));
   const keptStudents = data.students.filter((s) => existingByExt.has(s.externalId));
@@ -326,13 +328,25 @@ export async function importUniversityData(
           programId: programId.get(`${s.facultyCode}\u0000${s.programName}`)!,
           academicGroupId: groupId.get(s.academicGroup)!,
         });
+        // Логин, почта и зачётка уникальны. В новом файле они могут «переехать» от одного студента
+        // к другому (например, тот же ID у другого человека), поэтому сначала даём временные значения.
+        const kept = keptStudents.map((s) => ({ s, old: existingByExt.get(s.externalId)! }));
+        const keptUserIds = kept.map((k) => k.old.userId);
+        const keptIds = kept.map((k) => k.old.id);
+        await tx.$executeRaw`UPDATE "User" SET "login" = '~import~' || "id" WHERE "id" = ANY(${keptUserIds})`;
+        await tx.$executeRaw`UPDATE "Student" SET "email" = '~import~' || "id", "recordBookNo" = '~import~' || "id" WHERE "id" = ANY(${keptIds})`;
         const studentId = new Map<string, string>();
-        for (const s of keptStudents) {
-          const old = existingByExt.get(s.externalId)!;
+        const movedCredentials: CredentialRow[] = [];
+        for (const { s, old } of kept) {
           await tx.user.update({ where: { id: old.userId }, data: { login: s.login } });
           await tx.student.update({ where: { id: old.id }, data: studentFields(s) });
           studentId.set(s.externalId, old.id);
+          // Пароль в credentials.csv переезжает вместе с аккаунтом, если сменился логин или ФИО
+          const row = credentials.get(old.user.login);
+          if (row) movedCredentials.push({ ...row, login: s.login, fullName: fio(s), email: s.email });
         }
+        for (const { old } of kept) credentials.delete(old.user.login);
+        for (const row of movedCredentials) credentials.set(row.login, row);
         const newUsers = [];
         const newStudentRows = [];
         for (const [i, s] of newStudents.entries()) {

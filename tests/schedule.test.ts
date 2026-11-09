@@ -1,6 +1,6 @@
 /**
  * Слой данных расписания (lib/data/schedule.ts).
- * Нужна база с основным набором данных: npm run db:setup.
+ * Нужна база с загруженным набором данных: npm run db:setup (или импорт папки UNIVERSITY_DATA_DIR + db:seed).
  *
  * Личное расписание сверяется с подсчётом НАПРЯМУЮ по data/university/*.csv
  * (простым разбором строк, независимо от кода импорта).
@@ -23,7 +23,8 @@ import {
 } from "@/lib/data/schedule";
 import { moscowToday } from "@/lib/moscow-time";
 
-const DATA = path.join(process.cwd(), "data/university");
+// Другой набор файлов: UNIVERSITY_DATA_DIR=<папка> npm test (после импорта этой папки)
+const DATA = path.resolve(process.env.UNIVERSITY_DATA_DIR || "data/university");
 
 /** Простой разбор: в основном наборе нет кавычек, поэтому достаточно split. */
 function readRows(file: string): Record<string, string>[] {
