@@ -12,3 +12,4 @@ coverage
 # генераторы данных (в сборку кабинета не нужны; сами данные data/university — нужны для импорта)
 tools
 credentials.csv
+credentials.csv.tmp

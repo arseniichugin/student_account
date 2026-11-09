@@ -2,7 +2,8 @@
 # Приводит Codespace в соответствие с текущим кодом. Делает только то, что нужно:
 #   зависимости — если изменился package-lock.json;
 #   миграции   — всегда (если менять нечего, это мгновенно);
-#   демо-данные — если изменились seed.ts или схема базы (данные сбрасываются к исходным);
+#   данные вуза и демо-данные — если изменились файлы data/university, импорт, seed.ts
+#                 или схема базы (демо-данные сбрасываются к исходным, пароли студентов сохраняются);
 #   сборка     — если код изменился с прошлой сборки.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -30,9 +31,10 @@ done
 echo "▶ Применяю изменения схемы базы"
 npx prisma migrate deploy >/dev/null
 
-SEED=$(fingerprint prisma/seed.ts prisma/schema.prisma)
+SEED=$(fingerprint prisma/seed.ts prisma/schema.prisma data/university/* lib/university-data/*.ts)
 if changed seed "$SEED"; then
-  echo "▶ Обновляю демо-данные"
+  echo "▶ Загружаю данные вуза (data/university) и демо-данные"
+  npm run data:import
   npm run db:seed
   echo "$SEED" > "$STATE/seed"
 fi

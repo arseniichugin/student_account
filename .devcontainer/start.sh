@@ -27,8 +27,10 @@ echo " Кабинет запускается на порту 3000 (версия 
 echo " Если вкладка не открылась сама: вкладка PORTS внизу → строка 3000 →"
 echo " значок глобуса (Open in Browser)."
 echo " Формы принимаются с адресов: $SERVER_ACTIONS_ALLOWED_ORIGINS"
-echo " Логины: dima.sokolov, anna.belova, timur.kim, dekanat.fit, dekanat.ef"
-echo " Пароль:  Gorizont2026"
+# Тестовые логины зависят от файлов data/university — берём их из credentials.csv, который пишет импорт.
+LOGINS=$(grep -E ";(Деканат|Студент \(тестовый\));" credentials.csv 2>/dev/null | cut -d';' -f1 | paste -sd, - | sed 's/,/, /g')
+echo " Логины: ${LOGINS:-larisa.sharova26, eva.orlova25, yaroslav.shestakov24, dekanat.gr}"
+echo " Пароль:  ${DEMO_PASSWORD:-Hogwarts2026}"
 echo " Обновить без перезапуска Codespace: Ctrl+C здесь, затем"
 echo "   bash .devcontainer/start.sh"
 echo "=================================================================="

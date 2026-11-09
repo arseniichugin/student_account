@@ -1,6 +1,7 @@
 # Архитектура
 
-> Статус: **реализовано на этапе 2** (вход, сессии, разграничение доступа, заявки). Остальные разделы — этап 3.
+> Статус: **реализовано на этапе 2** (вход, сессии, разграничение доступа, заявки).
+> Этап 3: данные вуза из заменяемых файлов (`data/university/`), импорт, слой данных расписания.
 
 ## 1. Общая схема
 
@@ -48,35 +49,85 @@ PostgreSQL (через Prisma)
 | Свои компоненты вместо `npx shadcn add` | Реестр shadcn недоступен из облачного окружения разработки; компоненты написаны по тому же образцу (лицензия MIT) |
 | Шрифт через Fontsource, а не Google Fonts | Шрифт отдаётся с нашего сервера — не зависит от доступности Google из России |
 | Клиент Prisma создаётся лениво (`lib/db.ts`) | Иначе `next build` падает без `DATABASE_URL` (найдено при сборке Docker-образа) |
-| Расписание в seed — на весь осенний семестр | Жюри открывает кабинет в разные дни: пары, переносы и отмены есть на любой неделе |
+| Данные вуза — в заменяемых файлах, а не в seed | Кабинет можно перенести на другой вуз, заменив три файла; код не знает названий факультетов и групп |
+| Импорт: сначала проверка всех файлов, потом одна транзакция | Ошибка в строке 20 000 не оставит базу «наполовину» загруженной |
+| Лекция потока — одно занятие и связи с группами (`LessonGroup`) | Нет дублей, перенос лекции меняется в одном месте; дата продублирована в связи ради индекса «группа + даты» |
+| Расписание за весь семестр и сессию | Жюри открывает кабинет в разные дни: пары, переносы и отмены есть на любой неделе |
 
 ## 3. Модель данных
 
 Полная схема — `prisma/schema.prisma`. Кратко:
 
 ```
-User            id, login, passwordHash, role (STUDENT | STAFF), createdAt
+User            id, login, passwordHash, role (STUDENT | STAFF), isDemo, createdAt
 Session         id, userId, expiresAt                — хранится хеш токена
-Faculty         id, name
-Program         id, facultyId, name, code            — направление подготовки
-Group           id, programId, name, course
-Student         id, userId, groupId, lastName, firstName, middleName, recordBookNo
-Staff           id, userId, facultyId, fullName, position
-Teacher         id, fullName                         — вымышленные преподаватели
-Subject         id, name
-Lesson          id, groupId, subjectId, teacherId, type, room, startsAt, endsAt,
-                status (NORMAL | MOVED | CANCELLED), originalStartsAt?, originalRoom?
-Grade           id, studentId, subjectId, semester, kind (EXAM | CREDIT | COURSEWORK),
-                value, date
-Deadline        id, groupId, subjectId?, title, dueAt
-RequestType     id, name, description, fields (JSON)
+LoginAttempt    id, login, ip, success, createdAt   — для ограничения попыток
+
+── из students.csv ──
+Faculty         id, code («ГР»), name, sortOrder (порядок в файле)
+Program         id, facultyId, name                  — направление подготовки
+Group           id, name, kind (ACADEMIC | LANGUAGE | OTHER), course?, facultyId?,
+                parentId? (языковая группа → академическая), oid?
+Student         id, externalId («ID студента»), userId, ФИО, email, recordBookNo,
+                course, facultyId, programId, academicGroupId
+StudentGroup    studentId, groupId, position (1/2) — языковые группы студента
+Staff           id, userId, facultyId, fullName, position — по одному на факультет
+
+── из schedule.csv и campus-map.json (расписание заменяется целиком) ──
+Teacher         id, oid (lecturerOid), shortName, fullName, rank?, email?
+Building        id, key (id на карте), name, abbr?, address?, floors, onMap
+Room            id, number («4144», «Манеж-1»), buildingId?, type?, capacity?, floor?, purpose?, bookable, onMap
+Discipline      id, name, oid?
+Lesson          id, oid (lessonOid), date, startTime, endTime («HH:MM» по Москве), startsAt, endsAt (UTC),
+                pairStart?, pairEnd?, disciplineId, kind («Лекция»…), teacherId?, roomId?, buildingId?,
+                stream?, subGroup?, note?, url?, status (NORMAL | MOVED | CANCELLED | REPLACED)
+LessonGroup     lessonId, groupId, date — лекция потока = одно занятие + несколько групп
+                индексы: LessonGroup(groupId, date), Lesson(teacherId, date)
+
+── демо-контент (prisma/seed.ts) и действия пользователей ──
+Grade           id, studentId, disciplineId, semester, kind (EXAM | CREDIT | COURSEWORK | MIDTERM), value?, date?
+Deadline        id, groupId, disciplineId?, title, dueAt
+RequestType     id, code, name, description, etaDays
 Request         id, studentId, typeId, payload (JSON),
                 status (SUBMITTED | IN_PROGRESS | READY | ISSUED | REJECTED),
                 staffComment?, createdAt, updatedAt
-Announcement    id, authorId, title, body, audience (faculty / course / group), publishedAt
+Announcement    id, authorId, title, body, facultyId? / course? / groupId? (аудитория), publishedAt
 Notification    id, userId, type, title, body, link?, readAt?, createdAt
-LoginAttempt    id, login, ip, success, createdAt   — для ограничения попыток
 ```
+
+### 3.1 Импорт данных вуза (`npm run data:import`)
+
+Код — `lib/university-data/` (тестируется без базы), команда — `scripts/import-university-data.ts`,
+формат файлов — [`data/university/README.md`](../data/university/README.md).
+
+```
+students.csv ─┐
+schedule.csv ─┼─► validate.ts: разбор CSV (BOM, «;»/«,», кавычки) + Zod по каждой строке
+campus-map.json┘     + перекрёстные проверки (группы студентов есть в расписании, уникальность…)
+                     │ ошибки → «файл, строка N: колонка «…» — …», выход ≠ 0, база не тронута
+                     ▼
+                 import.ts: хеши паролей (вне транзакции) → ОДНА транзакция:
+                   факультеты/направления/группы — upsert по коду/названию (id сохраняются)
+                   дисциплины, преподаватели, корпуса, аудитории — по ключу; занятия — заново (createMany пачками)
+                   студенты — по «ID студента» (заявки, оценки, пароли сохраняются), лишние — удаляются
+                   деканаты — dekanat.<код латиницей>; тестовые аккаунты — пароль DEMO_PASSWORD
+                     ▼
+                 credentials.csv (вне git): логины и пароли новых и тестовых аккаунтов
+```
+
+- Основной набор (990 студентов, 23,5 тыс. строк расписания) загружается за ~10–15 с.
+- `npm run db:seed` добавляет демо-контент поверх импорта и берёт факультеты, группы и дисциплины
+  из базы — работает с любыми заменёнными файлами.
+
+### 3.2 Слой данных расписания (`lib/data/schedule.ts`)
+
+- Личное расписание — `getMyScheduleForDate(ctx, date?)`, `getMyScheduleForRange(ctx, from, to)`:
+  группы студента (академическая + языковые) берутся **по `ctx.studentId` из сессии**; занятия
+  соседних языковых групп не попадают.
+- Открытое расписание вуза для любого вошедшего (`requireUser()` → `UserContext`): `listFaculties`,
+  `searchScheduleTargets` (группы и преподаватели, **без студентов**), `getGroupSchedule`, `getTeacherSchedule`.
+- «Сегодня» — по Москве (`lib/moscow-time.ts`); результат — плоские объекты (даты `YYYY-MM-DD`, время `HH:MM`).
+- Период не длиннее 190 дней; неверные даты → `ScheduleRangeError`.
 
 ## 4. Безопасность
 
@@ -119,12 +170,19 @@ LoginAttempt    id, login, ip, success, createdAt   — для ограниче�
 - Никаких секретов в `NEXT_PUBLIC_*`, в коде и в репозитории. `.env` в `.gitignore`.
 - Все входные данные валидируются Zod на сервере.
 - Пароли и токены не пишутся в логи.
-- Все данные — вымышленные, создаются seed-скриптом.
+- Все данные — вымышленные: вуз — из файлов `data/university/`, демо-контент — seed-скриптом.
+- Пароли, выданные импортом, существуют в открытом виде только в `credentials.csv` (в `.gitignore`
+  и `.dockerignore`, права 600); в консоль и логи не выводятся.
+- Ссылки на онлайн-занятия из файлов принимаются только `http(s)://` — `javascript:` не попадёт в кнопку.
 
 ### 4.5 Проверка
-- `tests/security.test.ts` — 14 автотестов: чужая заявка не открывается, сотрудник не меняет
+- `tests/security.test.ts` — чужая заявка не открывается, сотрудник не видит и не меняет
   заявки чужого факультета, пароли — только хеши argon2id, блокировка после 5 ошибок входа,
   ошибки с одного адреса не блокируют аккаунт для других, лимит на подачу заявок.
+- `tests/university-data.test.ts` — сломанные файлы вуза дают понятные ошибки и не меняют базу.
+- `tests/university-import.test.ts` — повторный импорт идемпотентен и не меняет пароли.
+- `tests/schedule.test.ts` — личное расписание совпадает с подсчётом по CSV, без чужих языковых групп;
+  поиск не возвращает студентов.
 - Аудит субагентом `security-reviewer` (8 ноября): утечек чужих данных и обхода ролей не найдено;
   найденные риски для демо-стенда исправлены, остальное — в `ROADMAP.md`, этапы 5–6.
 - Сквозная проверка в браузере (Playwright): вход, подача заявки, подмена адреса → 404,
@@ -140,16 +198,20 @@ app/
   (student)/             кабинет студента: today, requests, profile (+ schedule, grades, notifications — этап 3)
   (staff)/staff/         кабинет сотрудника: заявки факультета
 lib/
-  auth/                  сессии, хеширование, ограничение попыток, requireStudent / requireStaff
-  data/                  доступ к данным с проверкой владельца
+  auth/                  сессии, хеширование, ограничение попыток, requireStudent / requireStaff / requireUser
+  data/                  доступ к данным с проверкой владельца (schedule.ts — расписание)
+  university-data/       разбор, проверка и импорт файлов вуза
+  moscow-time.ts         даты и время по Москве
   validation/            схемы Zod
   generated/prisma/      клиент Prisma (генерируется, не коммитится)
 components/              UI-компоненты
 prisma/
   schema.prisma          схема базы
   migrations/            миграции
-  seed.ts                вымышленные данные
-tests/                   автотесты безопасности
+  seed.ts                демо-контент поверх импорта
+data/university/         заменяемые файлы вуза (students.csv, schedule.csv, campus-map.json)
+scripts/                 import-university-data.ts (npm run data:import)
+tests/                   автотесты безопасности, импорта, расписания; fixtures/ — маленький набор файлов
 proxy.ts                 быстрый редирект на /login без cookie
 Dockerfile, docker-compose.yml
 docs/                    документация проекта и для ИИ
@@ -158,7 +220,7 @@ docs/                    документация проекта и для ИИ
 ## 6. Развёртывание
 
 ```
-docker compose run --rm migrate   # миграции + демо-данные (образ сборки с Prisma CLI)
+docker compose run --rm migrate   # миграции + импорт data/university + демо-данные (образ сборки с Prisma CLI)
 docker compose up -d app          # приложение (автономный сервер Next.js) + PostgreSQL
 ```
 

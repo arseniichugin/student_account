@@ -1,0 +1,54 @@
+{
+  "source": "тестовая карта",
+  "buildings": [
+    {
+      "id": "a",
+      "name": "Корпус А",
+      "abbr": "А",
+      "address": "ул. Тестовая, 1",
+      "floors": [
+        1
+      ],
+      "wings": [
+        null
+      ],
+      "maxRoom": 3,
+      "scheme": "1NN"
+    }
+  ],
+  "rooms": [
+    {
+      "id": 1,
+      "number": "101",
+      "building": "a",
+      "type": "Семинарская",
+      "capacity": 20,
+      "floor": 1,
+      "wing": null,
+      "purpose": null,
+      "bookable": true
+    },
+    {
+      "id": 2,
+      "number": "102",
+      "building": "a",
+      "type": "Семинарская",
+      "capacity": 20,
+      "floor": 1,
+      "wing": null,
+      "purpose": null,
+      "bookable": true
+    },
+    {
+      "id": 3,
+      "number": "103",
+      "building": "a",
+      "type": "Семинарская",
+      "capacity": 20,
+      "floor": 1,
+      "wing": null,
+      "purpose": null,
+      "bookable": true
+    }
+  ]
+}

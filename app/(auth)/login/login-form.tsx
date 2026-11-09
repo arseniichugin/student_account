@@ -21,7 +21,7 @@ export function LoginForm() {
           autoCapitalize="none"
           spellCheck={false}
           defaultValue={state?.login}
-          placeholder="например, dima.sokolov"
+          placeholder="например, ivan.petrov26"
           required
         />
       </div>

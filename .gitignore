@@ -54,6 +54,7 @@ tools/schedule-generator/out/
 
 # логины и пароли, которые создаёт импорт данных: ТОЛЬКО для раздачи, никогда не коммитить
 credentials.csv
+credentials.csv.tmp
 
 # рабочие копии субагентов Claude Code (git worktree)
 .claude/worktrees/

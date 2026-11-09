@@ -1,122 +1,48 @@
 /**
- * Наполнение базы ВЫМЫШЛЕННЫМИ данными для демонстрации.
- * Университет «Горизонт», все люди, оценки и номера зачёток придуманы;
- * любые совпадения с реальными людьми случайны.
+ * Демо-наполнение ПОВЕРХ импортированных данных вуза (npm run data:import).
  *
- * Запуск: npm run db:seed (база очищается и заполняется заново).
+ * Вуз (факультеты, группы, студенты, расписание) seed больше не создаёт: всё берётся из базы,
+ * поэтому скрипт работает с любыми заменёнными файлами data/university/*.
+ * Он пересоздаёт только демо-контент: оценки, заявки, объявления, уведомления, дедлайны.
+ * Всё вымышленное; совпадения с реальными людьми случайны.
+ *
+ * Запуск: npm run db:seed (после npm run data:import). Повторный запуск даёт тот же результат.
  */
 import "dotenv/config";
-import { hashPassword } from "../lib/auth/password";
 import { createPrismaClient } from "../lib/prisma-client";
-import type { GradeKind, LessonType } from "../lib/generated/prisma/client";
+import type { GradeKind, NotificationType, RequestStatus } from "../lib/generated/prisma/client";
+import { dbDateToIso, moscowDateTime } from "../lib/moscow-time";
 
 const db = createPrismaClient();
 
-const DEMO_PASSWORD = process.env.SEED_DEMO_PASSWORD || "Gorizont2026";
+// ─── Детерминированный «случай» ─────────────────────────────────────
 
-// ─── Время ──────────────────────────────────────────────────────────
-// Все времена — по Москве (UTC+3, без перехода на летнее время).
-const MSK_OFFSET_H = 3;
-
-/** Дата и время по Москве → Date (UTC). */
-function msk(y: number, m: number, d: number, hh = 0, mm = 0) {
-  return new Date(Date.UTC(y, m - 1, d, hh - MSK_OFFSET_H, mm));
+function hash(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return h >>> 0;
 }
 
-const PAIRS = [
-  { start: [9, 0], end: [10, 30] },
-  { start: [10, 45], end: [12, 15] },
-  { start: [13, 0], end: [14, 30] },
-  { start: [14, 45], end: [16, 15] },
-  { start: [16, 30], end: [18, 0] },
-] as const;
+function rng(seed: string) {
+  let s = hash(seed) || 1;
+  return () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
 
-const SEMESTER_START = msk(2026, 9, 1); // вторник, 1 сентября
-const SEMESTER_END = msk(2026, 12, 27);
+function pick<T>(rand: () => number, items: readonly T[]): T {
+  return items[Math.floor(rand() * items.length)]!;
+}
 
-// ─── Справочники ────────────────────────────────────────────────────
+/** Дата и время по Москве. */
+const msk = (y: number, m: number, d: number, hh = 12, mm = 0) =>
+  moscowDateTime(`${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`, `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`);
 
-const TEACHERS = [
-  "Орлов Виктор Петрович",
-  "Зайцева Марина Игоревна",
-  "Гусев Алексей Романович",
-  "Карпова Елена Викторовна",
-  "Тихонов Сергей Ильич",
-  "Нестерова Ирина Павловна",
-  "Миронов Павел Андреевич",
-  "Фролова Дарья Олеговна",
-];
+const RU_MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+const ruDate = (iso: string) => `${Number(iso.slice(8, 10))} ${RU_MONTHS[Number(iso.slice(5, 7)) - 1]}`;
 
-type WeeklySlot = {
-  weekday: 1 | 2 | 3 | 4 | 5; // пн..пт
-  pair: 0 | 1 | 2 | 3 | 4;
-  subject: string;
-  type: LessonType;
-  teacher: number; // индекс в TEACHERS
-  room: string;
-};
-
-const PI_SCHEDULE: WeeklySlot[] = [
-  { weekday: 1, pair: 0, subject: "Базы данных", type: "LECTURE", teacher: 0, room: "Г-305" },
-  { weekday: 1, pair: 1, subject: "Базы данных", type: "LAB", teacher: 0, room: "Г-412" },
-  { weekday: 1, pair: 2, subject: "Английский язык", type: "SEMINAR", teacher: 5, room: "А-210" },
-  { weekday: 2, pair: 1, subject: "Веб-разработка", type: "LECTURE", teacher: 1, room: "Г-301" },
-  { weekday: 2, pair: 2, subject: "Веб-разработка", type: "LAB", teacher: 1, room: "Г-414" },
-  { weekday: 3, pair: 0, subject: "Операционные системы", type: "LECTURE", teacher: 2, room: "Г-305" },
-  { weekday: 3, pair: 1, subject: "Теория вероятностей", type: "SEMINAR", teacher: 3, room: "Б-118" },
-  { weekday: 3, pair: 2, subject: "Операционные системы", type: "LAB", teacher: 2, room: "Г-410" },
-  { weekday: 4, pair: 1, subject: "Проектирование ПО", type: "LECTURE", teacher: 4, room: "Г-201" },
-  { weekday: 4, pair: 2, subject: "Проектирование ПО", type: "SEMINAR", teacher: 4, room: "Г-207" },
-  { weekday: 5, pair: 0, subject: "Теория вероятностей", type: "LECTURE", teacher: 3, room: "Б-101" },
-  { weekday: 5, pair: 1, subject: "Английский язык", type: "SEMINAR", teacher: 5, room: "А-210" },
-];
-
-const EK_SCHEDULE: WeeklySlot[] = [
-  { weekday: 1, pair: 1, subject: "Микроэкономика", type: "LECTURE", teacher: 6, room: "Э-101" },
-  { weekday: 1, pair: 2, subject: "Математический анализ", type: "SEMINAR", teacher: 3, room: "Б-120" },
-  { weekday: 2, pair: 0, subject: "Математический анализ", type: "LECTURE", teacher: 3, room: "Б-101" },
-  { weekday: 2, pair: 1, subject: "История России", type: "LECTURE", teacher: 7, room: "А-301" },
-  { weekday: 3, pair: 1, subject: "Микроэкономика", type: "SEMINAR", teacher: 6, room: "Э-204" },
-  { weekday: 3, pair: 2, subject: "Информатика", type: "LAB", teacher: 1, room: "Г-414" },
-  { weekday: 4, pair: 0, subject: "Английский язык", type: "SEMINAR", teacher: 5, room: "А-212" },
-  { weekday: 4, pair: 1, subject: "История России", type: "SEMINAR", teacher: 7, room: "А-305" },
-  { weekday: 5, pair: 1, subject: "Математический анализ", type: "SEMINAR", teacher: 3, room: "Б-120" },
-  { weekday: 5, pair: 2, subject: "Физическая культура", type: "SEMINAR", teacher: 2, room: "Спортзал" },
-];
-
-const PAST_SUBJECTS_PI: { semester: number; subject: string; kind: GradeKind }[] = [
-  { semester: 1, subject: "Математический анализ", kind: "EXAM" },
-  { semester: 1, subject: "Программирование на Python", kind: "EXAM" },
-  { semester: 1, subject: "История России", kind: "CREDIT" },
-  { semester: 1, subject: "Английский язык", kind: "CREDIT" },
-  { semester: 2, subject: "Линейная алгебра", kind: "EXAM" },
-  { semester: 2, subject: "Алгоритмы и структуры данных", kind: "EXAM" },
-  { semester: 2, subject: "Физическая культура", kind: "CREDIT" },
-  { semester: 3, subject: "Дискретная математика", kind: "EXAM" },
-  { semester: 3, subject: "Объектно-ориентированное программирование", kind: "EXAM" },
-  { semester: 3, subject: "Курсовая работа по ООП", kind: "COURSEWORK" },
-  { semester: 3, subject: "Английский язык", kind: "CREDIT" },
-  { semester: 4, subject: "Компьютерные сети", kind: "EXAM" },
-  { semester: 4, subject: "Архитектура ЭВМ", kind: "EXAM" },
-  { semester: 4, subject: "Экономика", kind: "CREDIT" },
-];
-
-const CURRENT_SUBJECTS_PI = [
-  "Базы данных",
-  "Веб-разработка",
-  "Операционные системы",
-  "Теория вероятностей",
-  "Проектирование ПО",
-  "Английский язык",
-];
-
-const CURRENT_SUBJECTS_EK = [
-  "Микроэкономика",
-  "Математический анализ",
-  "История России",
-  "Информатика",
-  "Английский язык",
-];
+// ─── Справочник заявок ──────────────────────────────────────────────
 
 const REQUEST_TYPES = [
   {
@@ -149,290 +75,407 @@ const REQUEST_TYPES = [
     description: "Перерыв в учёбе по медицинским, семейным или иным причинам. Деканат свяжется для уточнения документов.",
     etaDays: 10,
   },
-];
+] as const;
 
-// ─── Утилиты ────────────────────────────────────────────────────────
+type TypeCode = (typeof REQUEST_TYPES)[number]["code"];
 
-/** Детерминированный генератор псевдослучайных чисел — данные одинаковы при каждом запуске. */
-function rng(seed: number) {
-  let s = seed;
-  return () => {
-    s = (s * 1664525 + 1013904223) % 4294967296;
-    return s / 4294967296;
-  };
-}
-
-function pick<T>(rand: () => number, items: readonly T[]): T {
-  return items[Math.floor(rand() * items.length)]!;
-}
-
-function addDays(d: Date, days: number) {
-  return new Date(d.getTime() + days * 86_400_000);
-}
-
-// ─── Основной сценарий ──────────────────────────────────────────────
-
-async function clear() {
-  // Порядок важен из-за внешних ключей.
-  await db.notification.deleteMany();
-  await db.announcement.deleteMany();
-  await db.request.deleteMany();
-  await db.requestType.deleteMany();
-  await db.grade.deleteMany();
-  await db.deadline.deleteMany();
-  await db.lesson.deleteMany();
-  await db.subject.deleteMany();
-  await db.teacher.deleteMany();
-  await db.student.deleteMany();
-  await db.staff.deleteMany();
-  await db.session.deleteMany();
-  await db.loginAttempt.deleteMany();
-  await db.user.deleteMany();
-  await db.group.deleteMany();
-  await db.program.deleteMany();
-  await db.faculty.deleteMany();
-}
+// Текущий учебный год: осенний семестр 2026 года.
+const ACADEMIC_YEAR_START = 2026;
+const LECTURE_KINDS = new Set(["Лекция", "Консультация", "Экзамен", "Зачёт"]);
 
 async function main() {
-  console.log("Очистка базы…");
-  await clear();
-
-  const passwordHash = await hashPassword(DEMO_PASSWORD);
-
-  // Структура вуза
-  const fit = await db.faculty.create({ data: { name: "Факультет информационных технологий", short: "ФИТ" } });
-  const ef = await db.faculty.create({ data: { name: "Экономический факультет", short: "ЭФ" } });
-
-  const pi = await db.program.create({
-    data: { code: "09.03.04", name: "Программная инженерия", facultyId: fit.id },
-  });
-  const ek = await db.program.create({ data: { code: "38.03.01", name: "Экономика", facultyId: ef.id } });
-
-  const groupPi = await db.group.create({ data: { name: "ПИ-24-1", course: 3, programId: pi.id } });
-  const groupEk = await db.group.create({ data: { name: "ЭК-26-2", course: 1, programId: ek.id } });
-
-  // Пользователи
-  async function createStudent(
-    login: string,
-    groupId: string,
-    fio: [string, string, string],
-    recordBookNo: string,
-  ) {
-    const user = await db.user.create({ data: { login, passwordHash, role: "STUDENT" } });
-    const student = await db.student.create({
-      data: {
-        userId: user.id,
-        groupId,
-        lastName: fio[0],
-        firstName: fio[1],
-        middleName: fio[2],
-        recordBookNo,
-      },
-    });
-    return { user, student };
+  const facultyCount = await db.faculty.count();
+  if (facultyCount === 0) {
+    console.error("В базе нет данных вуза. Сначала выполните: npm run data:import");
+    process.exit(1);
   }
 
-  const dima = await createStudent("dima.sokolov", groupPi.id, ["Соколов", "Дмитрий", "Андреевич"], "24-ПИ-0117");
-  const timur = await createStudent("timur.kim", groupPi.id, ["Ким", "Тимур", "Олегович"], "24-ПИ-0142");
-  const anna = await createStudent("anna.belova", groupEk.id, ["Белова", "Анна", "Сергеевна"], "26-ЭК-0308");
-
-  const staffFitUser = await db.user.create({ data: { login: "dekanat.fit", passwordHash, role: "STAFF" } });
-  await db.staff.create({
-    data: {
-      userId: staffFitUser.id,
-      facultyId: fit.id,
-      fullName: "Морозова Ольга Сергеевна",
-      position: "Специалист по учебной работе",
+  // ─── Читаем то, что загрузил импорт ───────────────────────────────
+  const faculties = await db.faculty.findMany({
+    orderBy: { sortOrder: "asc" },
+    select: { id: true, code: true, name: true, staff: { select: { userId: true }, take: 1 } },
+  });
+  const students = await db.student.findMany({
+    orderBy: { externalId: "asc" },
+    select: {
+      id: true,
+      externalId: true,
+      userId: true,
+      firstName: true,
+      lastName: true,
+      course: true,
+      facultyId: true,
+      academicGroupId: true,
+      academicGroup: { select: { name: true } },
+      languageGroups: { orderBy: { position: "asc" }, select: { groupId: true, position: true } },
+      user: { select: { isDemo: true, login: true } },
     },
   });
-  const staffEfUser = await db.user.create({ data: { login: "dekanat.ef", passwordHash, role: "STAFF" } });
-  await db.staff.create({
-    data: {
-      userId: staffEfUser.id,
-      facultyId: ef.id,
-      fullName: "Лебедев Игорь Павлович",
-      position: "Специалист по учебной работе",
-    },
+  // Сортировка по ID как по числу, если ID числовые
+  students.sort((a, b) => {
+    const na = Number(a.externalId);
+    const nb = Number(b.externalId);
+    return Number.isFinite(na) && Number.isFinite(nb) ? na - nb : a.externalId.localeCompare(b.externalId);
   });
+  const groups = await db.group.findMany({ select: { id: true, name: true, kind: true, course: true, facultyId: true } });
+  const disciplines = new Map((await db.discipline.findMany({ select: { id: true, name: true } })).map((d) => [d.id, d.name]));
 
-  // Преподаватели и дисциплины
-  const teachers = await Promise.all(TEACHERS.map((fullName) => db.teacher.create({ data: { fullName } })));
-  const subjectNames = new Set<string>([
-    ...PI_SCHEDULE.map((s) => s.subject),
-    ...EK_SCHEDULE.map((s) => s.subject),
-    ...PAST_SUBJECTS_PI.map((s) => s.subject),
-  ]);
-  const subjects = new Map<string, string>();
-  for (const name of subjectNames) {
-    const s = await db.subject.create({ data: { name } });
-    subjects.set(name, s.id);
-  }
-  const subjectId = (name: string) => subjects.get(name)!;
-
-  // Расписание на весь семестр + переносы и отмены каждую неделю
-  console.log("Расписание…");
-  async function buildSchedule(groupId: string, slots: WeeklySlot[], seed: number) {
-    const rand = rng(seed);
-    const lessons = [];
-    for (let day = SEMESTER_START; day <= SEMESTER_END; day = addDays(day, 1)) {
-      const local = new Date(day.getTime() + MSK_OFFSET_H * 3_600_000);
-      const weekday = local.getUTCDay();
-      if (weekday === 0 || weekday === 6) continue;
-      const y = local.getUTCFullYear();
-      const m = local.getUTCMonth() + 1;
-      const d = local.getUTCDate();
-      // 4 ноября — праздник
-      if (m === 11 && d === 4) continue;
-
-      for (const slot of slots.filter((s) => s.weekday === weekday)) {
-        const pair = PAIRS[slot.pair];
-        const base = {
-          groupId,
-          subjectId: subjectId(slot.subject),
-          teacherId: teachers[slot.teacher]!.id,
-          type: slot.type,
-          room: slot.room,
-          startsAt: msk(y, m, d, pair.start[0], pair.start[1]),
-          endsAt: msk(y, m, d, pair.end[0], pair.end[1]),
-        };
-        const roll = rand();
-        if (roll < 0.04) {
-          lessons.push({ ...base, status: "CANCELLED" as const });
-        } else if (roll < 0.1 && slot.pair < 4) {
-          // Перенос: на следующую пару или в другую аудиторию
-          const moveTime = rand() < 0.5;
-          const next = PAIRS[slot.pair + 1]!;
-          lessons.push({
-            ...base,
-            status: "MOVED" as const,
-            originalStartsAt: base.startsAt,
-            originalRoom: base.room,
-            room: moveTime ? base.room : pick(rand, ["Г-101", "Б-204", "А-118", "Г-220"]),
-            ...(moveTime
-              ? {
-                  startsAt: msk(y, m, d, next.start[0], next.start[1]),
-                  endsAt: msk(y, m, d, next.end[0], next.end[1]),
-                }
-              : {}),
-          });
-        } else {
-          lessons.push(base);
-        }
-      }
+  // Дисциплины каждой группы по расписанию: groupId → disciplineId → виды работ
+  const lessonRows = await db.lesson.findMany({
+    select: { disciplineId: true, kind: true, groups: { select: { groupId: true } } },
+  });
+  const groupDisciplines = new Map<string, Map<string, Set<string>>>();
+  for (const l of lessonRows) {
+    for (const { groupId } of l.groups) {
+      const m = groupDisciplines.get(groupId) ?? new Map<string, Set<string>>();
+      const kinds = m.get(l.disciplineId) ?? new Set<string>();
+      kinds.add(l.kind);
+      m.set(l.disciplineId, kinds);
+      groupDisciplines.set(groupId, m);
     }
-    await db.lesson.createMany({ data: lessons });
-    return lessons.length;
   }
-  const nPi = await buildSchedule(groupPi.id, PI_SCHEDULE, 24);
-  const nEk = await buildSchedule(groupEk.id, EK_SCHEDULE, 26);
-  console.log(`  ПИ-24-1: ${nPi} занятий, ЭК-26-2: ${nEk} занятий`);
-
-  // Дедлайны
-  await db.deadline.createMany({
-    data: [
-      { groupId: groupPi.id, subjectId: subjectId("Базы данных"), title: "Лабораторная №4: индексы и планы запросов", dueAt: msk(2026, 11, 13, 23, 59) },
-      { groupId: groupPi.id, subjectId: subjectId("Веб-разработка"), title: "Проект: прототип SPA — промежуточная сдача", dueAt: msk(2026, 11, 18, 23, 59) },
-      { groupId: groupPi.id, subjectId: subjectId("Проектирование ПО"), title: "Курсовой проект: техническое задание", dueAt: msk(2026, 11, 25, 18, 0) },
-      { groupId: groupPi.id, subjectId: subjectId("Операционные системы"), title: "Лабораторная №5: процессы и потоки", dueAt: msk(2026, 12, 2, 23, 59) },
-      { groupId: groupPi.id, title: "Выбор темы ВКР — анкета в деканате", dueAt: msk(2026, 12, 10, 17, 0) },
-      { groupId: groupEk.id, subjectId: subjectId("Микроэкономика"), title: "Эссе «Эластичность спроса»", dueAt: msk(2026, 11, 12, 23, 59) },
-      { groupId: groupEk.id, subjectId: subjectId("Математический анализ"), title: "Контрольная работа №2", dueAt: msk(2026, 11, 20, 9, 0) },
-      { groupId: groupEk.id, subjectId: subjectId("Информатика"), title: "Практикум в Excel: сводные таблицы", dueAt: msk(2026, 11, 27, 23, 59) },
-      { groupId: groupEk.id, title: "Оформить студенческий билет (фото в деканат)", dueAt: msk(2026, 11, 16, 17, 0) },
-    ],
-  });
-
-  // Оценки
-  console.log("Оценки…");
-  async function pastGrades(studentId: string, seed: number, debts: string[] = []) {
-    const rand = rng(seed);
-    await db.grade.createMany({
-      data: PAST_SUBJECTS_PI.map((g) => {
-        const isDebt = debts.includes(g.subject);
-        let value: string;
-        if (g.kind === "CREDIT") value = isDebt ? "не зачтено" : "зачтено";
-        else value = isDebt ? "2" : String(pick(rand, [3, 4, 4, 5, 5, 5]));
-        const month = g.semester % 2 === 1 ? 1 : 6;
-        const year = 2024 + Math.ceil(g.semester / 2);
-        return {
-          studentId,
-          subjectId: subjectId(g.subject),
-          semester: g.semester,
-          kind: g.kind,
-          value,
-          date: msk(year, month, 15 + Math.floor(rand() * 10)),
-        };
-      }),
-    });
+  const disciplinesOf = (groupId: string) => [...(groupDisciplines.get(groupId)?.keys() ?? [])].sort((a, b) => disciplines.get(a)!.localeCompare(disciplines.get(b)!, "ru"));
+  /** Дисциплины академических групп факультета на курсе — для оценок прошлых лет. */
+  const yearDisciplines = new Map<string, string[]>();
+  for (const g of groups) {
+    if (g.kind !== "ACADEMIC" || !g.facultyId || !g.course) continue;
+    const key = `${g.facultyId}:${g.course}`;
+    yearDisciplines.set(key, [...new Set([...(yearDisciplines.get(key) ?? []), ...disciplinesOf(g.id)])]);
   }
-  await pastGrades(dima.student.id, 117);
-  await pastGrades(timur.student.id, 142, ["Компьютерные сети"]);
 
-  // Текущий семестр: контрольные точки (часть ещё не выставлена)
-  async function midterms(studentId: string, semester: number, list: string[], seed: number) {
-    const rand = rng(seed);
-    await db.grade.createMany({
-      data: list.map((subject, i) => ({
-        studentId,
-        subjectId: subjectId(subject),
-        semester,
-        kind: "MIDTERM" as const,
-        value: i === list.length - 1 ? null : String(pick(rand, [3, 4, 5, 5])),
-        date: i === list.length - 1 ? null : msk(2026, 10, 20 + i),
-      })),
-    });
-  }
-  await midterms(dima.student.id, 5, CURRENT_SUBJECTS_PI, 5117);
-  await midterms(timur.student.id, 5, CURRENT_SUBJECTS_PI, 5142);
-  await midterms(anna.student.id, 1, CURRENT_SUBJECTS_EK, 1308);
+  // Тестовые студенты — в том же порядке, в каком их выбирает импорт: факультет №1, №2, №3…
+  const facultyOrder = new Map(faculties.map((f, i) => [f.id, i]));
+  const testStudents = students
+    .filter((s) => s.user.isDemo)
+    .sort((a, b) => facultyOrder.get(a.facultyId)! - facultyOrder.get(b.facultyId)! || a.course - b.course);
+  const staffUserByFaculty = new Map(faculties.map((f) => [f.id, f.staff[0]?.userId ?? null]));
 
-  // Заявки
-  console.log("Заявки…");
-  const types = new Map<string, string>();
+  // ─── Очистка демо-контента ────────────────────────────────────────
+  console.log("Очищаю прежний демо-контент…");
+  await db.$transaction([
+    db.notification.deleteMany(),
+    db.announcement.deleteMany(),
+    db.request.deleteMany(),
+    db.grade.deleteMany(),
+    db.deadline.deleteMany(),
+  ]);
+
+  // ─── Типы заявок ──────────────────────────────────────────────────
+  const typeId = new Map<TypeCode, string>();
   for (const t of REQUEST_TYPES) {
-    const created = await db.requestType.create({ data: t });
-    types.set(t.code, created.id);
+    const row = await db.requestType.upsert({ where: { code: t.code }, create: t, update: t, select: { id: true } });
+    typeId.set(t.code, row.id);
   }
-  const typeId = (code: string) => types.get(code)!;
 
-  const requests = [
-    { studentId: dima.student.id, typeId: typeId("STUDY_CERT"), status: "READY" as const, payload: { destination: "По месту работы", copies: 1, comment: "" }, staffComment: "Справка готова. Заберите в ауд. Г-112 (пн–пт, 10:00–16:00).", createdAt: msk(2026, 11, 3, 11, 20) },
-    { studentId: dima.student.id, typeId: typeId("SCHOLARSHIP_CERT"), status: "IN_PROGRESS" as const, payload: { destination: "Отдел социальной защиты", copies: 1, comment: "За сентябрь–октябрь" }, staffComment: null, createdAt: msk(2026, 11, 6, 15, 5) },
-    { studentId: timur.student.id, typeId: typeId("MILITARY_CERT"), status: "ISSUED" as const, payload: { destination: "Военный комиссариат", copies: 1, comment: "" }, staffComment: "Выдана 22.10.", createdAt: msk(2026, 10, 19, 9, 40) },
-    { studentId: timur.student.id, typeId: typeId("TRANSCRIPT"), status: "REJECTED" as const, payload: { destination: "Для стажировки", copies: 2, comment: "" }, staffComment: "Есть академическая задолженность по «Компьютерным сетям». Выписка будет доступна после пересдачи.", createdAt: msk(2026, 11, 2, 13, 0) },
-    { studentId: anna.student.id, typeId: typeId("STUDY_CERT"), status: "SUBMITTED" as const, payload: { destination: "Для оформления социальной карты", copies: 1, comment: "" }, staffComment: null, createdAt: msk(2026, 11, 7, 18, 30) },
+  // ─── Оценки ───────────────────────────────────────────────────────
+  console.log("Оценки…");
+  // Студент с «долгом» — второй тестовый (у него же отклонённая выписка) и ~4% остальных.
+  const debtors = new Set(students.filter((s) => (testStudents[1] ? s.id === testStudents[1].id : false) || (!s.user.isDemo && hash(s.externalId) % 25 === 0)).map((s) => s.id));
+  const debtSubject = new Map<string, string>();
+  const grades: {
+    studentId: string;
+    disciplineId: string;
+    semester: number;
+    kind: GradeKind;
+    value: string | null;
+    date: Date | null;
+  }[] = [];
+
+  for (const s of students) {
+    const rand = rng(`grades:${s.externalId}`);
+    const languageDisciplines = s.languageGroups.map((g) => ({ position: g.position, list: disciplinesOf(g.groupId) }));
+    const pastSemesters = 2 * (s.course - 1);
+    for (let sem = 1; sem <= pastSemesters; sem++) {
+      const year = Math.ceil(sem / 2);
+      const autumn = sem % 2 === 1;
+      // Сессия: зимняя — январь следующего года, летняя — июнь.
+      const sessionYear = ACADEMIC_YEAR_START - (s.course - year) + 1;
+      const month = autumn ? 1 : 6;
+      const items: { disciplineId: string; kind: GradeKind }[] = [];
+      (yearDisciplines.get(`${s.facultyId}:${year}`) ?? []).forEach((d, i) => {
+        items.push({ disciplineId: d, kind: (i + sem) % 2 === 0 ? "EXAM" : "CREDIT" });
+      });
+      for (const lang of languageDisciplines) {
+        for (const d of lang.list) items.push({ disciplineId: d, kind: lang.position === 1 && !autumn ? "EXAM" : "CREDIT" });
+      }
+      if (year >= 2 && !autumn && items.length > 0) {
+        items.push({ disciplineId: items[0]!.disciplineId, kind: "COURSEWORK" });
+      }
+      const isLastPast = sem === pastSemesters;
+      items.forEach((it, i) => {
+        const debt = debtors.has(s.id) && isLastPast && i === 0;
+        if (debt) debtSubject.set(s.id, disciplines.get(it.disciplineId)!);
+        const value =
+          it.kind === "CREDIT"
+            ? debt
+              ? "не зачтено"
+              : "зачтено"
+            : debt
+              ? "2"
+              : String(pick(rand, [3, 4, 4, 5, 5, 5]));
+        grades.push({
+          studentId: s.id,
+          disciplineId: it.disciplineId,
+          semester: sem,
+          kind: it.kind,
+          value,
+          date: msk(sessionYear, month, 12 + Math.floor(rand() * 16), 10),
+        });
+      });
+    }
+    // Текущий семестр: контрольные точки по дисциплинам из расписания (часть ещё не выставлена)
+    const current = [
+      ...new Set([s.academicGroupId, ...s.languageGroups.map((g) => g.groupId)].flatMap((g) => disciplinesOf(g))),
+    ];
+    current.forEach((d, i) => {
+      const graded = rand() < 0.75;
+      grades.push({
+        studentId: s.id,
+        disciplineId: d,
+        semester: pastSemesters + 1,
+        kind: "MIDTERM",
+        value: graded ? String(pick(rand, [3, 4, 4, 5, 5])) : null,
+        date: graded ? msk(2026, 10, 19 + (i % 12), 12) : null,
+      });
+    });
+  }
+  for (let i = 0; i < grades.length; i += 5000) await db.grade.createMany({ data: grades.slice(i, i + 5000) });
+
+  // ─── Заявки ───────────────────────────────────────────────────────
+  console.log("Заявки…");
+  const rooms = await db.room.findMany({ where: { purpose: { startsWith: "Деканат" } }, select: { number: true, purpose: true } });
+  const deanRoom = (facultyId: string) => {
+    const f = faculties.find((x) => x.id === facultyId)!;
+    const word = f.name.split(/\s+/).at(-1)!;
+    const r = rooms.find((x) => x.purpose!.includes(word));
+    return r ? `в деканате, ауд. ${r.number}` : "в деканате";
+  };
+
+  type RequestSeed = {
+    studentId: string;
+    code: TypeCode;
+    status: RequestStatus;
+    destination: string;
+    copies?: number;
+    comment?: string;
+    staffComment?: string | null;
+    createdAt: Date;
+  };
+  const requests: RequestSeed[] = [];
+  const [t1, t2, t3] = testStudents;
+  if (t1) {
+    requests.push(
+      { studentId: t1.id, code: "STUDY_CERT", status: "READY", destination: "По месту работы", staffComment: `Справка готова. Заберите ${deanRoom(t1.facultyId)} (пн–пт, 10:00–16:00).`, createdAt: msk(2026, 11, 3, 11, 20) },
+      { studentId: t1.id, code: "SCHOLARSHIP_CERT", status: "IN_PROGRESS", destination: "Отдел социальной защиты", comment: "За сентябрь–октябрь", createdAt: msk(2026, 11, 6, 15, 5) },
+    );
+  }
+  if (t2) {
+    const debt = debtSubject.get(t2.id);
+    requests.push(
+      { studentId: t2.id, code: "MILITARY_CERT", status: "ISSUED", destination: "Военный комиссариат", staffComment: "Выдана 22.10.", createdAt: msk(2026, 10, 19, 9, 40) },
+      {
+        studentId: t2.id,
+        code: "TRANSCRIPT",
+        status: "REJECTED",
+        destination: "Для стажировки",
+        copies: 2,
+        staffComment: debt
+          ? `Есть академическая задолженность по дисциплине «${debt}». Выписка будет доступна после пересдачи.`
+          : "Есть академическая задолженность. Выписка будет доступна после пересдачи.",
+        createdAt: msk(2026, 11, 2, 13, 0),
+      },
+      { studentId: t2.id, code: "STUDY_CERT", status: "SUBMITTED", destination: "Для оформления социальной карты", createdAt: msk(2026, 11, 7, 18, 30) },
+    );
+  }
+  if (t3) {
+    requests.push(
+      { studentId: t3.id, code: "STUDY_CERT", status: "SUBMITTED", destination: "В банк", createdAt: msk(2026, 11, 8, 10, 15) },
+      { studentId: t3.id, code: "TRANSCRIPT", status: "READY", destination: "Для программы обмена", copies: 2, staffComment: `Выписка готова. Заберите ${deanRoom(t3.facultyId)}.`, createdAt: msk(2026, 11, 4, 16, 45) },
+    );
+  }
+  // Очередь каждого деканата: ещё по 4 заявки от обычных студентов факультета
+  const QUEUE: { code: TypeCode; status: RequestStatus; destination: string; staffComment?: string }[] = [
+    { code: "STUDY_CERT", status: "SUBMITTED", destination: "По месту работы родителей" },
+    { code: "SCHOLARSHIP_CERT", status: "SUBMITTED", destination: "В налоговую инспекцию" },
+    { code: "MILITARY_CERT", status: "IN_PROGRESS", destination: "Военный комиссариат" },
+    { code: "STUDY_CERT", status: "READY", destination: "В поликлинику", staffComment: "Справка готова." },
   ];
+  for (const f of faculties) {
+    const pool = students.filter((s) => s.facultyId === f.id && !s.user.isDemo);
+    QUEUE.forEach((q, i) => {
+      const s = pool[Math.floor(((i + 0.5) * pool.length) / QUEUE.length)];
+      if (s) requests.push({ studentId: s.id, ...q, createdAt: msk(2026, 11, 2 + i * 2, 9 + i, 10 * i) });
+    });
+  }
+  const createdRequests: { id: string; studentId: string; status: RequestStatus; code: TypeCode; staffComment?: string | null }[] = [];
   for (const r of requests) {
-    await db.request.create({ data: { ...r, updatedAt: r.createdAt } });
+    const row = await db.request.create({
+      data: {
+        studentId: r.studentId,
+        typeId: typeId.get(r.code)!,
+        status: r.status,
+        payload: { destination: r.destination, copies: r.copies ?? 1, comment: r.comment ?? "" },
+        staffComment: r.staffComment ?? null,
+        createdAt: r.createdAt,
+        updatedAt: r.createdAt,
+      },
+      select: { id: true },
+    });
+    createdRequests.push({ id: row.id, studentId: r.studentId, status: r.status, code: r.code, staffComment: r.staffComment });
   }
 
-  // Объявления
-  await db.announcement.createMany({
-    data: [
-      { authorId: staffFitUser.id, title: "Запись на выбор темы ВКР", body: "Студенты 3 курса ФИТ: до 10 декабря заполните анкету выбора темы и руководителя ВКР. Список тем — у кураторов групп.", facultyId: fit.id, course: 3, publishedAt: msk(2026, 11, 5, 10, 0) },
-      { authorId: staffFitUser.id, title: "График зимней сессии опубликован", body: "Экзамены пройдут с 11 по 29 января. Расписание консультаций появится в кабинете за неделю до сессии.", facultyId: fit.id, publishedAt: msk(2026, 11, 6, 12, 0) },
-      { authorId: staffEfUser.id, title: "Посвящение в студенты", body: "14 ноября в 18:00 — посвящение для первокурсников экономического факультета. Актовый зал корпуса А.", facultyId: ef.id, course: 1, publishedAt: msk(2026, 11, 2, 9, 0) },
-      { authorId: staffEfUser.id, title: "Неделя открытых библиотек", body: "С 16 по 20 ноября библиотека работает до 21:00. Приходите готовиться к контрольным!", publishedAt: msk(2026, 11, 7, 9, 0) },
-    ],
-  });
+  // ─── Дедлайны ─────────────────────────────────────────────────────
+  console.log("Дедлайны…");
+  const TASKS = [
+    (d: string) => `Контрольная работа №2 по дисциплине «${d}»`,
+    (d: string) => `${d}: реферат — сдать преподавателю`,
+    (d: string) => `${d}: домашнее задание к семинару`,
+    (d: string) => `${d}: проект — промежуточная сдача`,
+  ];
+  const LANGUAGE_TASKS = [
+    (d: string) => `${d}: эссе на 250 слов`,
+    (d: string) => `${d}: домашнее чтение — пересказ текста`,
+  ];
+  const deadlines: { groupId: string; disciplineId: string | null; title: string; dueAt: Date }[] = [];
+  for (const g of groups) {
+    const rand = rng(`deadlines:${g.name}`);
+    const practical = disciplinesOf(g.id).filter((d) => [...groupDisciplines.get(g.id)!.get(d)!].some((k) => !LECTURE_KINDS.has(k)));
+    const list = g.kind === "ACADEMIC" ? practical.slice(0, 3) : practical.slice(0, 1);
+    list.forEach((d, i) => {
+      const tasks = g.kind === "ACADEMIC" ? TASKS : LANGUAGE_TASKS;
+      // С 13 ноября по 18 декабря, обычно в 23:59
+      const day = 13 + Math.floor(rand() * 36);
+      const date = new Date(Date.UTC(2026, 10, day));
+      deadlines.push({
+        groupId: g.id,
+        disciplineId: d,
+        title: tasks[(i + hash(g.name)) % tasks.length]!(disciplines.get(d)!),
+        dueAt: msk(2026, date.getUTCMonth() + 1, date.getUTCDate(), 23, 59),
+      });
+    });
+    if (g.kind === "ACADEMIC" && g.course === 1) {
+      deadlines.push({ groupId: g.id, disciplineId: null, title: "Сдать фото для студенческого билета в деканат", dueAt: msk(2026, 11, 20, 17, 0) });
+    }
+  }
+  await db.deadline.createMany({ data: deadlines });
 
-  // Уведомления
-  await db.notification.createMany({
-    data: [
-      { userId: dima.user.id, type: "REQUEST_STATUS", title: "Справка об обучении: готова", body: "Заберите в ауд. Г-112 (пн–пт, 10:00–16:00).", link: "/requests", createdAt: msk(2026, 11, 5, 14, 0) },
-      { userId: dima.user.id, type: "DEADLINE", title: "Через 5 дней: лабораторная №4 по базам данных", body: "Срок сдачи — 13 ноября, 23:59.", createdAt: msk(2026, 11, 8, 9, 0) },
-      { userId: timur.user.id, type: "REQUEST_STATUS", title: "Выписка оценок: отклонена", body: "Есть академическая задолженность. Подробности — в заявке.", link: "/requests", createdAt: msk(2026, 11, 3, 10, 0) },
-      { userId: anna.user.id, type: "ANNOUNCEMENT", title: "Посвящение в студенты — 14 ноября", body: "Актовый зал корпуса А, 18:00.", createdAt: msk(2026, 11, 2, 9, 0) },
-    ],
-  });
+  // ─── Объявления ───────────────────────────────────────────────────
+  console.log("Объявления…");
+  const sessionDates = new Map<string, { from: string; to: string }>();
+  for (const f of faculties) {
+    const exam = await db.lesson.aggregate({
+      where: { kind: "Экзамен", groups: { some: { group: { facultyId: f.id } } } },
+      _min: { date: true },
+      _max: { date: true },
+    });
+    if (exam._min.date && exam._max.date) sessionDates.set(f.id, { from: dbDateToIso(exam._min.date), to: dbDateToIso(exam._max.date) });
+  }
+  const courses = [...new Set(students.map((s) => s.course))].sort((a, b) => a - b);
+  const announcements: { authorId: string; title: string; body: string; facultyId?: string | null; course?: number | null; publishedAt: Date }[] = [];
+  for (const f of faculties) {
+    const author = staffUserByFaculty.get(f.id);
+    if (!author) continue;
+    const session = sessionDates.get(f.id);
+    announcements.push({
+      authorId: author,
+      title: "График зимней сессии опубликован",
+      body: session
+        ? `Экзамены пройдут с ${ruDate(session.from)} по ${ruDate(session.to)}. Консультации — за 1–2 дня до экзамена, время и аудитории смотрите в расписании.`
+        : "Расписание экзаменов появится в кабинете за месяц до начала сессии.",
+      facultyId: f.id,
+      publishedAt: msk(2026, 11, 6, 12, 0),
+    });
+    if (courses[0] !== undefined) {
+      announcements.push({
+        authorId: author,
+        title: "Посвящение в студенты",
+        body: `20 ноября в 18:00 — посвящение для первокурсников. ${f.name} ждёт всех в Большом зале. Приходите с одногруппниками!`,
+        facultyId: f.id,
+        course: courses[0],
+        publishedAt: msk(2026, 11, 2, 9, 0),
+      });
+    }
+    const last = courses.at(-1);
+    if (last !== undefined && last !== courses[0]) {
+      announcements.push({
+        authorId: author,
+        title: "Выбор темы выпускной работы",
+        body: `Студенты ${last} курса: до 10 декабря выберите тему и научного руководителя. Список тем — на кафедрах, вопросы — в деканате.`,
+        facultyId: f.id,
+        course: last,
+        publishedAt: msk(2026, 11, 5, 10, 0),
+      });
+    }
+  }
+  const firstStaff = staffUserByFaculty.get(faculties[0]!.id);
+  if (firstStaff) {
+    announcements.push({
+      authorId: firstStaff,
+      title: "Неделя открытых библиотек",
+      body: "С 16 по 20 ноября библиотека и читальный зал работают до 21:00. Приходите готовиться к контрольным!",
+      publishedAt: msk(2026, 11, 7, 9, 0),
+    });
+  }
+  await db.announcement.createMany({ data: announcements });
 
-  console.log("\nГотово. Демо-аккаунты (пароль у всех одинаковый):");
-  console.log("  Студент, ФИТ, 3 курс:   dima.sokolov");
-  console.log("  Студент, ФИТ, 3 курс:   timur.kim");
-  console.log("  Студентка, ЭФ, 1 курс:  anna.belova");
-  console.log("  Деканат ФИТ:            dekanat.fit");
-  console.log("  Деканат ЭФ:             dekanat.ef");
-  console.log(process.env.SEED_DEMO_PASSWORD ? "  Пароль: из SEED_DEMO_PASSWORD" : `  Пароль: ${DEMO_PASSWORD}`);
+  // ─── Уведомления ──────────────────────────────────────────────────
+  console.log("Уведомления…");
+  const notifications: { userId: string; type: NotificationType; title: string; body: string; link?: string | null; createdAt: Date; readAt?: Date | null }[] = [];
+  const studentById = new Map(students.map((s) => [s.id, s]));
+  const typeName = new Map(REQUEST_TYPES.map((t) => [t.code, t.name]));
+  for (const r of createdRequests) {
+    if (r.status === "SUBMITTED" || r.status === "IN_PROGRESS") continue;
+    const s = studentById.get(r.studentId)!;
+    const statusText = { READY: "готова", ISSUED: "выдана", REJECTED: "отклонена" }[r.status as "READY" | "ISSUED" | "REJECTED"];
+    notifications.push({
+      userId: s.userId,
+      type: "REQUEST_STATUS",
+      title: `${typeName.get(r.code)}: ${statusText}`,
+      body: r.staffComment || "Статус вашей заявки изменился.",
+      link: `/requests/${r.id}`,
+      createdAt: msk(2026, 11, 8, 14, 0),
+      readAt: r.status === "ISSUED" ? msk(2026, 11, 8, 15, 0) : null,
+    });
+  }
+  for (const s of testStudents) {
+    const myGroups = [s.academicGroupId, ...s.languageGroups.map((g) => g.groupId)];
+    const deadline = deadlines.filter((d) => myGroups.includes(d.groupId)).sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime())[0];
+    if (deadline) {
+      notifications.push({
+        userId: s.userId,
+        type: "DEADLINE",
+        title: `Скоро срок: ${deadline.title}`,
+        body: `Сдать до ${ruDate(deadline.dueAt.toISOString().slice(0, 10))}, 23:59.`,
+        createdAt: msk(2026, 11, 9, 9, 0),
+      });
+    }
+    const change = await db.lesson.findFirst({
+      where: { status: { not: "NORMAL" }, date: { gte: new Date("2026-11-09T00:00:00Z") }, groups: { some: { groupId: { in: myGroups } } } },
+      orderBy: [{ date: "asc" }, { startTime: "asc" }],
+      select: { date: true, startTime: true, status: true, note: true, discipline: { select: { name: true } } },
+    });
+    if (change) {
+      const what = { MOVED: "перенос", CANCELLED: "отмена", REPLACED: "замена преподавателя", NORMAL: "изменение" }[change.status];
+      notifications.push({
+        userId: s.userId,
+        type: "SCHEDULE_CHANGE",
+        title: `${change.discipline.name}: ${what}`,
+        body: `${ruDate(dbDateToIso(change.date))}, ${change.startTime}. ${change.note ?? "Подробности — в расписании."}`,
+        createdAt: msk(2026, 11, 8, 18, 0),
+      });
+    }
+    const ann = announcements.find((a) => a.facultyId === s.facultyId && (a.course == null || a.course === s.course));
+    if (ann) {
+      notifications.push({ userId: s.userId, type: "ANNOUNCEMENT", title: ann.title, body: ann.body, createdAt: ann.publishedAt });
+    }
+  }
+  await db.notification.createMany({ data: notifications });
+
+  console.log(
+    `\nГотово: оценок ${grades.length}, заявок ${createdRequests.length}, дедлайнов ${deadlines.length}, ` +
+      `объявлений ${announcements.length}, уведомлений ${notifications.length}.`,
+  );
+  console.log(`Тестовые студенты: ${testStudents.map((s) => s.user.login).join(", ") || "нет (запустите npm run data:import)"}`);
 }
 
 main()

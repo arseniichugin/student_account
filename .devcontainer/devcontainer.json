@@ -1,7 +1,7 @@
 // Конфигурация для GitHub Codespaces: кабинет запускается в браузере без установки программ.
 // Как открыть: на странице репозитория Code → Codespaces → Create codespace on main.
 {
-  "name": "Горизонт · цифровой деканат",
+  "name": "Хогвартс · цифровой деканат",
   "dockerComposeFile": "docker-compose.yml",
   "service": "app",
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",

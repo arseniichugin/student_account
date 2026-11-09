@@ -68,8 +68,9 @@
 ## 5. Шаги развёртывания (этап 6)
 
 1. Арендовать VPS, установить Docker и Caddy.
-2. `git clone`, создать `.env`: длинный случайный `POSTGRES_PASSWORD`, свой `SEED_DEMO_PASSWORD`.
-3. `docker compose run --rm migrate` — таблицы и демо-данные.
+2. `git clone`, создать `.env`: длинный случайный `POSTGRES_PASSWORD`, свой `DEMO_PASSWORD`.
+3. `docker compose run --rm migrate` — таблицы, импорт `data/university` и демо-данные.
+   Логины и пароли студентов появятся в `credentials.csv` в папке проекта на сервере — не публикуйте его.
 4. `docker compose up -d app` — приложение (слушает только `127.0.0.1:3000`).
 5. Caddy: домен → `reverse_proxy 127.0.0.1:3000`, `header_up X-Real-IP {remote_host}`; HTTPS и HSTS.
 6. Проверить с телефона через мобильный интернет без VPN, вписать ссылку и пароль в README.

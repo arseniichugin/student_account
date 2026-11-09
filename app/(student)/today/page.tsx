@@ -31,7 +31,7 @@ export default async function TodayPage() {
         <p className="text-sm text-muted first-letter:uppercase">{todayFmt.format(new Date())}</p>
         <h1 className="mt-1 text-[28px] leading-tight font-bold lg:text-[32px]">Привет, {profile.firstName}!</h1>
         <p className="mt-1 text-muted">
-          {profile.group.program.faculty.short} · {profile.group.course} курс · группа {profile.group.name}
+          {profile.faculty.code} · {profile.course} курс · группа {profile.academicGroup.name}
         </p>
       </div>
 
