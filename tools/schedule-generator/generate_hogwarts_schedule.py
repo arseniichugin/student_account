@@ -5,7 +5,7 @@
 студента «Хогвартса».
 
 Основа — спецификация mgimo_schedule_schema.md (модель РУЗ, формат mgimo_ruz.py),
-поверх неё — решения, согласованные с заказчиком (см. data/README.md):
+поверх неё — решения, согласованные с заказчиком (см. README.md рядом):
   * 4 факультета (ГР, СЛ, КГ, ПФ) × 4 курса × 3 академические группы;
   * 10 общих предметов + «<Факультет>: специализация» с 3 курса + 10 языков;
   * академическая группа 1-ГР-1, языковая группа 1-ГР-1 (5) — подгруппа одной
@@ -13,9 +13,11 @@
   * Пн–Пт, сетка A у ГР и СЛ, сетка B у КГ и ПФ;
   * зачётная неделя 21–31.12.2026, экзамены 11–31.01.2027.
 
-Запуск (только стандартная библиотека, Python 3.9+):
-    python generator/generate_hogwarts_schedule.py            # seed 2026, вывод в data/
-    python generator/generate_hogwarts_schedule.py --seed 7 --out data_test
+Запуск из корня репозитория (только стандартная библиотека, Python 3.9+):
+    python tools/schedule-generator/generate_hogwarts_schedule.py
+        → data/university/schedule.csv и students.csv (заменяемые файлы кабинета)
+        → tools/schedule-generator/out/ (SQLite, JSON, справочники — рабочие файлы, не в git)
+    python tools/schedule-generator/generate_hogwarts_schedule.py --seed 7 --data /tmp/test --out /tmp/test/out
 """
 from __future__ import annotations
 
@@ -30,7 +32,9 @@ import uuid
 from collections import Counter, defaultdict
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent              # tools/schedule-generator
+REPO = ROOT.parent.parent                           # корень репозитория
+DATA = REPO / "data" / "university"                 # заменяемые файлы кабинета
 
 # ------------------------------------------------------------------ календарь
 SEM_START = dt.date(2026, 9, 1)
@@ -1213,10 +1217,12 @@ class Generator:
                             description=f"{where}; {r['type'].lower()}, {r['capacity']} мест", type="auditorium"))
         return out
 
-    def write(self, out: Path):
+    def write(self, out: Path, data: Path):
         out.mkdir(parents=True, exist_ok=True)
+        data.mkdir(parents=True, exist_ok=True)
         write_text_lf(out / "schema.sql", DDL)
-        dbp = out / "mgimo_schedule.sqlite"
+        write_text_lf(ROOT / "schema.sql", DDL)
+        dbp = out / "schedule.sqlite"
         if dbp.exists():
             dbp.unlink()
         con = sqlite3.connect(dbp)
@@ -1290,13 +1296,15 @@ class Generator:
                 r["status"] = l["status"]
                 rows.append(r)
         rows.sort(key=lambda r: (r["date"], r["beginLesson"], r["group"]))
-        with (out / "mgimo_schedule.csv").open("w", newline="", encoding="utf-8-sig") as fh:
+        # Заменяемый файл кабинета: формат mgimo_ruz.py + колонка status (normal/moved/cancelled/replaced)
+        with (data / "schedule.csv").open("w", newline="", encoding="utf-8-sig") as fh:
             w = csv.writer(fh, delimiter=";")
-            w.writerow(["lesson_key", *cols])
+            w.writerow(["lesson_key", *cols, "status"])
             for r in rows:
-                w.writerow([f"{r['lessonOid']}|{r['groupOid']}|", *["" if r[c] is None else r[c] for c in cols]])
+                w.writerow([f"{r['lessonOid']}|{r['groupOid']}|", *["" if r[c] is None else r[c] for c in cols],
+                            r["status"]])
         ents = self.entities()
-        with (out / "mgimo_schedule_entities.csv").open("w", newline="", encoding="utf-8-sig") as fh:
+        with (out / "entities.csv").open("w", newline="", encoding="utf-8-sig") as fh:
             w = csv.writer(fh, delimiter=";")
             w.writerow(["kind", "id", "label", "description"])
             for e in sorted(ents, key=lambda e: (e["type"], e["label"])):
@@ -1319,6 +1327,19 @@ class Generator:
                                      language=LANGS[self.groups[x]["language"]][0],
                                      level=self.groups[x]["level"]) for x in s["langs"]]))
         write_text_lf(out / "students.json", json.dumps(studs, ensure_ascii=False, indent=1))
+        # Заменяемый файл кабинета: список студентов в виде таблицы для Excel (;, UTF-8 с BOM).
+        # Группы указываются названиями — так же, как в колонке group файла schedule.csv.
+        with (data / "students.csv").open("w", newline="", encoding="utf-8-sig") as fh:
+            w = csv.writer(fh, delimiter=";")
+            w.writerow(["ID студента", "Фамилия", "Имя", "Отчество", "Email", "Номер зачётки", "Факультет",
+                        "Код факультета", "Курс", "Направление", "Академическая группа",
+                        "Языковая группа 1", "Языковая группа 2"])
+            for st in studs:
+                parts = st["fio"].split(" ", 2) + ["", "", ""]
+                langs = [x["group"] for x in st["languageGroups"]] + ["", ""]
+                w.writerow([st["studentOid"], parts[0], parts[1], parts[2], st["email"], st["recordBook"],
+                            st["faculty"], st["facultyAbbr"], st["course"], st["program"], st["group"],
+                            langs[0], langs[1]])
         self.n_rows = len(rows)
 
 
@@ -1471,7 +1492,7 @@ CREATE VIEW student_schedule AS
 
 # ================================================================== проверки (раздел 10 + доп.)
 def validate(out: Path, gen: Generator) -> str:
-    con = sqlite3.connect(out / "mgimo_schedule.sqlite")
+    con = sqlite3.connect(out / "schedule.sqlite")
     q = lambda sql: con.execute(sql).fetchall()
     res = []
 
@@ -1633,7 +1654,7 @@ def validate(out: Path, gen: Generator) -> str:
         lines.append(f"| {title} | {n} | {'OK' if ok else 'ОШИБКА'} |")
     lines += ["", "## Объём", "", "| Таблица | Записей |", "|---|---|"]
     lines += [f"| {k} | {v} |" for k, v in counts.items()]
-    lines += [f"| строк в mgimo_schedule.csv / schedule.json | {gen.n_rows} |", "",
+    lines += [f"| строк в schedule.csv / schedule.json | {gen.n_rows} |", "",
               "## Правдоподобие", "",
               f"- Занятий в семестре: {sem}, в сессии: {total - sem} (экзамены и консультации).",
               f"- Изменения: перенесено {st.get('moved', 0)}, отменено {st.get('cancelled', 0)}, "
@@ -1650,7 +1671,8 @@ def validate(out: Path, gen: Generator) -> str:
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Синтетическое расписание «Хогвартса» по mgimo_schedule_schema.md")
     ap.add_argument("--seed", type=int, default=2026)
-    ap.add_argument("--out", default=str(ROOT / "data"))
+    ap.add_argument("--out", default=str(ROOT / "out"), help="рабочие файлы: SQLite, JSON, справочники")
+    ap.add_argument("--data", default=str(DATA), help="заменяемые файлы кабинета: schedule.csv, students.csv")
     args = ap.parse_args(argv)
     out = Path(args.out)
     gen = None
@@ -1663,9 +1685,11 @@ def main(argv=None):
             print(f"seed {args.seed + attempt}: {e}, пробую следующий")
     else:
         raise SystemExit("не удалось построить расписание")
-    gen.write(out)
+    gen.write(out, Path(args.data))
     report, ok = validate(out, gen)
     write_text_lf(out / "validation_report.md", report)
+    if Path(args.data).resolve() == DATA.resolve():
+        write_text_lf(ROOT / "validation_report.md", report)
     print(report)
     return 0 if ok else 1
 

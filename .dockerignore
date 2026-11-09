@@ -9,5 +9,6 @@ docs
 tests
 coverage
 *.log
-# наборы данных и генераторы (в сборку кабинета не нужны)
-schedule
+# генераторы данных (в сборку кабинета не нужны; сами данные data/university — нужны для импорта)
+tools
+credentials.csv

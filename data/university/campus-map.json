@@ -1,5 +1,5 @@
 {
- "source": "data/mgimo_schedule.sqlite",
+ "source": "tools/schedule-generator/out/schedule.sqlite",
  "buildings": [
   {
    "id": "main",

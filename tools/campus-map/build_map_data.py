@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Собирает campus-data.json для интерактивной карты.
+"""Собирает data/university/campus-map.json для карты кампуса в кабинете.
 
-Если генератор расписания уже создал data/mgimo_schedule.sqlite, берём аудитории оттуда
+Если генератор расписания уже создал tools/schedule-generator/out/schedule.sqlite, берём аудитории оттуда
 (номера, тип, вместимость, назначение служебных помещений). Иначе синтезируем фонд
 по тем же правилам нумерации:
   * Главный корпус: ЭКNN — этаж 1–4, крыло 0/1, аудитория 01–79;
@@ -16,8 +16,10 @@ import random
 import sqlite3
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent.parent / "public" / "campus-map"
-DB = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parent.parent / "data" / "mgimo_schedule.sqlite"
+REPO = Path(__file__).resolve().parent.parent.parent
+OUT = REPO / "data" / "university" / "campus-map.json"
+# База, которую создаёт генератор расписания (tools/schedule-generator); путь можно передать первым аргументом.
+DB = Path(sys.argv[1]) if len(sys.argv) > 1 else REPO / "tools" / "schedule-generator" / "out" / "schedule.sqlite"
 
 BUILDINGS = [
     {"id": "main", "name": "Главный корпус", "abbr": "ГК", "address": "Замковая ул., 1", "floors": [1, 2, 3, 4],
@@ -100,11 +102,10 @@ def synth():
 
 def main():
     rooms = from_db() if DB.exists() else synth()
-    src = "data/mgimo_schedule.sqlite" if DB.exists() else "синтез по правилам нумерации"
+    src = "tools/schedule-generator/out/schedule.sqlite" if DB.exists() else "синтез по правилам нумерации"
     data = {"source": src, "buildings": BUILDINGS, "rooms": rooms}
     js = json.dumps(data, ensure_ascii=False, indent=1)
-    (HERE / "campus-data.json").write_text(js, encoding="utf-8")
-    (HERE / "campus-data.js").write_text("window.CAMPUS_DATA = " + js + ";\n", encoding="utf-8")
+    OUT.write_text(js, encoding="utf-8")
     print(f"{len(rooms)} помещений, источник: {src}")
 
 

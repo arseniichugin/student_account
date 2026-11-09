@@ -1,23 +1,24 @@
 # Синтетическое расписание «Хогвартса»
 
-> **Статус.** Это отдельный набор данных для концепта «Хогвартс». Сам кабинет пока работает на демо-данных
-> «Университета Горизонт» (`prisma/seed.ts`), к нему этот набор не подключён. ТЗ конкурса лежит в
-> [`docs/brief/`](../docs/brief/).
+> Генератор создаёт **заменяемые файлы кабинета** в [`data/university/`](../../data/university/):
+> `schedule.csv` и `students.csv`. Кабинет загружает их командой `npm run data:import`.
+> ТЗ конкурса лежит в [`docs/brief/`](../../docs/brief/).
 
 Данные для прототипа личного кабинета студента. Все данные вымышленные. Их собирает скрипт
-[`generator/generate_hogwarts_schedule.py`](generator/generate_hogwarts_schedule.py) по спецификации
+[`generate_hogwarts_schedule.py`](generate_hogwarts_schedule.py) по спецификации
 [`spec/mgimo_schedule_schema.md`](spec/mgimo_schedule_schema.md): модель РУЗ, формат [`spec/mgimo_ruz.py`](spec/mgimo_ruz.py). Поверх спецификации
 действуют решения, согласованные с заказчиком (ниже).
 
-Пересобрать данные (нужна только стандартная библиотека Python 3.9+):
+Пересобрать данные (из корня репозитория; нужна только стандартная библиотека Python 3.9+):
 
 ```bash
-cd schedule
-python generator/generate_hogwarts_schedule.py
+python tools/schedule-generator/generate_hogwarts_schedule.py
+python tools/campus-map/build_map_data.py      # карта: data/university/campus-map.json
+npm run data:import                            # загрузить в базу кабинета
 ```
 
-При фиксированном `seed` результат одинаковый (по умолчанию `--seed 2026`, вывод в `--out data`). После сборки
-скрипт сам прогоняет проверки и пишет их результат в [`data/validation_report.md`](data/validation_report.md).
+При фиксированном `seed` результат одинаковый (по умолчанию `--seed 2026`). После сборки скрипт сам прогоняет
+проверки и пишет их результат в [`validation_report.md`](validation_report.md).
 
 Все адреса почты и ссылки на онлайн-занятия выданы на домене `hogwarts.example.org`. Он вымышленный:
 поддомены `example.org` закреплены за IANA и не существуют, поэтому письмо или переход по ссылке
@@ -25,18 +26,24 @@ python generator/generate_hogwarts_schedule.py
 
 ## Файлы
 
-Все файлы ниже лежат в папке [`data/`](data/).
+**Заменяемые файлы кабинета** — в [`data/university/`](../../data/university/), формат описан там же:
 
 | Файл | Что внутри |
 |---|---|
-| `mgimo_schedule.sqlite` | все таблицы раздела 4 схемы, плюс `curriculum` (учебный план) и `events` |
-| `schema.sql` | DDL этих таблиц (SQLite, типы совместимы с PostgreSQL) |
-| `mgimo_schedule.csv` | плоский CSV в формате `mgimo_ruz.py`: одна строка на пару «занятие × группа», `;`, UTF-8 с BOM, даты `YYYY.MM.DD` |
-| `mgimo_schedule_entities.csv` | справочник для поиска: `kind;id;label;description` (group / person / auditorium) |
-| `schedule.json` | те же строки в формате API РУЗ, массив занятий (≈21 МБ) |
-| `entities.json` | справочник для поиска в формате `/api/search` |
-| `students.json` | студенты (ID, ФИО, зачётка, e-mail) с академической группой, потоком, двумя языковыми группами и списком `scheduleGroupOids` для личного расписания |
-| `validation_report.md` | результаты проверок |
+| `schedule.csv` | плоский CSV в формате `spec/mgimo_ruz.py` + колонка `status`: одна строка на пару «занятие × группа», `;`, UTF-8 с BOM, даты `YYYY.MM.DD` |
+| `students.csv` | студенты: ID, ФИО, почта, зачётка, факультет, курс, академическая и две языковые группы (названия — как в колонке `group` расписания) |
+
+**Рабочие файлы** — в `out/` (не хранятся в git, пересоздаются генератором):
+
+| Файл | Что внутри |
+|---|---|
+| `schedule.sqlite` | все таблицы раздела 4 схемы, плюс `curriculum` (учебный план) и `events`; из неё собирается карта |
+| `schedule.json` | те же строки, что в CSV, в формате API РУЗ (≈21 МБ) |
+| `entities.csv`, `entities.json` | справочник для поиска: группы, преподаватели, аудитории |
+| `students.json` | студенты со списком `scheduleGroupOids` |
+
+Рядом с генератором: [`schema.sql`](schema.sql) — DDL таблиц, [`validation_report.md`](validation_report.md) — результаты проверок,
+[`spec/`](spec/) — спецификация модели РУЗ.
 
 ## Личное расписание студента
 
@@ -58,8 +65,8 @@ python generator/generate_hogwarts_schedule.py
   ORDER BY date, begin_time;
   ```
 
-- **JSON без сервера.** Нужно взять из `students.json` список `scheduleGroupOids` студента (его академическая группа
-  и две языковые) и оставить в `schedule.json` только строки, у которых `groupOid` входит в этот список.
+- **Кабинет.** Берёт из `students.csv` академическую и две языковые группы студента и показывает строки
+  `schedule.csv`, у которых `group` — одна из них.
 
 Для всех 990 студентов оба способа дают одинаковое число занятий, около 280 за семестр и сессию.
 
@@ -124,8 +131,8 @@ python generator/generate_hogwarts_schedule.py
 
 ## Отличия от буквы схемы
 
-- В `schedule.json` каждое занятие дополнено полем `status` (`normal` / `moved` / `cancelled` / `replaced`), чтобы
-  кабинет мог показать отмены и переносы. CSV оставлен строго в формате `mgimo_ruz.py`.
+- В `schedule.csv` и `schedule.json` каждое занятие дополнено полем `status` (`normal` / `moved` / `cancelled` / `replaced`), чтобы
+  кабинет мог показать отмены и переносы. Остальные колонки CSV — строго в формате `mgimo_ruz.py`.
 - Поле `building` в CSV и JSON содержит название корпуса. Адрес лежит в таблице `buildings`.
 - Добавлены поля и таблицы: `auditoriums.floor / wing / purpose / is_bookable`, `groups.number_short`, таблица
   `curriculum`, представления `student_lessons` и `student_schedule`, поле `scheduleGroupOids` в `students.json`.
