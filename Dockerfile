@@ -24,6 +24,9 @@ RUN addgroup -S app && adduser -S app -G app
 COPY --from=build --chown=app:app /app/.next/standalone ./
 COPY --from=build --chown=app:app /app/.next/static ./.next/static
 COPY --from=build --chown=app:app /app/public ./public
+# Файлы вуза (карта читается с диска при запросе). На сервере папку обычно подключают томом
+# из docker-compose.yml — тогда замена файлов не требует пересборки образа.
+COPY --from=build --chown=app:app /app/data/university ./data/university
 USER app
 EXPOSE 3000
 CMD ["node", "server.js"]
