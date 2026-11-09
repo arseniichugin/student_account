@@ -4,6 +4,15 @@
  * затем этот файл.
  *   const map = HogwartsMap.mount(document.getElementById('map'), { data: window.CAMPUS_DATA, onSelect });
  *   map.focus('1047');      // открыть аудиторию из расписания; ссылка page.html#room=1047 делает то же
+ *   map.destroy();          // убрать карту из контейнера (например, при размонтировании компонента)
+ *
+ * Параметры mount: data — { buildings, rooms }; onSelect(room) — пользователь выбрал помещение;
+ * onClear() — закрыл карточку помещения; hash: false — не читать и не менять #room=… в адресе
+ * (в кабинете адресом управляет страница: /map?room=…).
+ *
+ * Безопасность: данные карты заменяемые, значит недоверенные. В DOM они попадают ТОЛЬКО через
+ * textContent и setAttribute (функции h() и el()) — браузер не разбирает их как HTML.
+ * Не используйте innerHTML / insertAdjacentHTML / outerHTML: тест tests/campus-map.test.ts это проверяет.
  *
  * Нумерация (как в генераторе расписания):
  *   Главный корпус — ЭКNN: этаж 1–4, крыло 0 (западное) / 1 (восточное), номер 01–79;
@@ -27,12 +36,11 @@
   const DEPTH = 62, COR = 26, CAP = 46, WALL = 5, TECH = 50;
   const WING = { 0: 'западное крыло', 1: 'восточное крыло' };
 
+  const own = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
   const cat = r => r.purpose && /^Деканат/.test(r.purpose) ? 'dean'
-    : r.purpose && /^Кафедра/.test(r.purpose) ? 'chair' : (TYPE_CLASS[r.type] || 'sem');
+    : r.purpose && /^Кафедра/.test(r.purpose) ? 'chair' : (own(TYPE_CLASS, r.type) ? TYPE_CLASS[r.type] : 'sem');
   const seq = r => { const m = r.number.match(/(\d{2})$/); return m ? +m[1] : 0; };
   const norm = s => String(s).toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim();
-  const shortName = p => p.replace(/^Деканат факультета /, 'Деканат ').replace(/^Кафедра специализации факультета /, 'Каф. спец. ')
-    .replace(/^Кафедра языка /, 'Каф. ').replace(/^Кафедра /, 'Каф. ').replace(/ языка$/, '');
 
   function el(tag, attrs, parent, text) {
     const n = document.createElementNS(NS, tag);
@@ -83,16 +91,19 @@
   }
 
   function mount(root, opts) {
+    opts = opts || {};
     const data = opts.data || window.CAMPUS_DATA;
     if (!data) throw new Error('HogwartsMap: нет данных (campus-data.js / campus-data.json)');
+    const useHash = opts.hash !== false;
     const B = Object.fromEntries(data.buildings.map(b => [b.id, b]));
-    const rooms = data.rooms;
+    // помещения неизвестного корпуса пропускаем, а не падаем на них
+    const rooms = data.rooms.filter(r => own(B, r.building));
     rooms.forEach(r => { r.floor = r.floor || 1; });
     const byNumber = Object.fromEntries(rooms.map(r => [norm(r.number), r]));
     const state = { building: null, floor: 1, selected: null, filter: new Set() };
 
     root.classList.add('hm');
-    root.innerHTML = '';
+    root.replaceChildren();
     const bar = h('div', 'hm-bar', root);
     const search = h('input', 'hm-search', bar);
     Object.assign(search, { type: 'search', placeholder: 'Аудитория, деканат, кафедра…' });
@@ -120,7 +131,7 @@
       h('i', null, b); h('span', null, b, name);
       b.type = 'button'; b.setAttribute('aria-pressed', 'false');
       b.onclick = () => {
-        state.filter.has(cls) ? state.filter.delete(cls) : state.filter.add(cls);
+        if (state.filter.has(cls)) state.filter.delete(cls); else state.filter.add(cls);
         b.setAttribute('aria-pressed', state.filter.has(cls));
         render();
       };
@@ -153,7 +164,7 @@
     };
     const ISO = (x, y, z) => [(x - y) * 0.866, (x + y) * 0.5 - z];
     function drawCampus() {
-      campusBox.innerHTML = '';
+      campusBox.replaceChildren();
       const svg = el('svg', { class: 'hm-iso', viewBox: '-230 -330 900 640', role: 'img', 'aria-label': 'Схема кампуса' }, campusBox);
       const pts = arr => arr.map(p => p.join(',')).join(' ');
       el('polygon', { points: pts([ISO(-130, -290, 0), ISO(820, -290, 0), ISO(820, 440, 0), ISO(-130, 440, 0)]), class: 'hm-iso-ground' }, svg);
@@ -175,10 +186,11 @@
       const st = ISO(230, 410, 0);
       el('text', { x: st[0], y: st[1] + 26, class: 'hm-iso-street-t', 'text-anchor': 'middle', transform: `rotate(30 ${st[0]} ${st[1] + 26})` }, svg, 'Замковая ул.');
       const all = [];
-      Object.entries(BOXES).forEach(([id, boxes]) => boxes.forEach(bx => all.push({ id, bx })));
+      ids.forEach(id => BOXES[id].forEach(bx => all.push({ id, bx })));
       all.sort((a, b) => (a.bx[0] + a.bx[1] + a.bx[2] + a.bx[3]) - (b.bx[0] + b.bx[1] + b.bx[2] + b.bx[3]));
       const groups = {};
-      Object.keys(BOXES).forEach(id => {
+      const ids = Object.keys(BOXES).filter(id => own(B, id));   // корпуса, которых нет в данных, не рисуем
+      ids.forEach(id => {
         const g = el('g', { class: 'hm-iso-bld' + (state.building === id ? ' sel' : ''), tabindex: 0, role: 'button', 'aria-label': B[id].name });
         g.onclick = () => setView(id);
         g.onkeydown = e => { if (e.key === 'Enter') setView(id); };
@@ -193,11 +205,11 @@
         el('polygon', { class: 'f-t', points: pts([ISO(x0, y0, z), ISO(x1, y0, z), ISO(x1, y1, z), ISO(x0, y1, z)]) }, g);
       });
       const labels = { main: [240, 200, 56], second: [605, 20, 70], obs: [-10, -210, 126], manege: [595, 215, 28] };
-      Object.entries(labels).forEach(([id, [x, y, z]]) => {
+      Object.entries(labels).filter(([id]) => own(B, id)).forEach(([id, [x, y, z]]) => {
         const [lx, ly] = ISO(x, y, z);
         el('text', { x: lx, y: ly, class: 'hm-iso-letter' + (state.building === id ? ' sel' : ''), 'text-anchor': 'middle' }, svg, B[id].abbr);
       });
-      const bb = svg.getBBox ? (() => { try { return svg.getBBox(); } catch (e) { return null; } })() : null;
+      const bb = svg.getBBox ? (() => { try { return svg.getBBox(); } catch { return null; } })() : null;
       if (bb && bb.width) svg.setAttribute('viewBox', `${bb.x - 30} ${bb.y - 40} ${bb.width + 60} ${bb.height + 70}`);
       campusBox.classList.toggle('compact', !!state.building);
       const cap = h('p', 'hm-iso-cap', campusBox, state.building ? '' : 'Нажмите на корпус, чтобы открыть поэтажный план');
@@ -431,7 +443,7 @@
     }
 
     function aboutText(b, list) {
-      about.innerHTML = '';
+      about.replaceChildren();
       const inB = rooms.filter(r => r.building === b.id);
       const deans = inB.filter(r => cat(r) === 'dean').map(r => r.purpose.replace('Деканат факультета ', ''));
       const base = {
@@ -439,7 +451,7 @@
         second: 'Пятиэтажный корпус, на 1–2 этажах соединён галереей с Главным корпусом. Номер: этаж, кабинет. На 3–5 этажах — лингафонные кабинеты и кафедры иностранных языков.',
         obs: 'Башня с двумя учебными куполами; практические занятия по астрономии проходят в конце учебного дня.',
         manege: 'Крытый манеж с тремя аренами для занятий верховой ездой, конюшней и раздевалками.'
-      }[b.id];
+      }[b.id] || '';
       h('p', null, about, base + (deans.length ? ` Здесь расположены деканаты факультетов ${deans.join(', ')}.` : ''));
       const marked = list.filter(r => r.purpose);
       if (marked.length) {
@@ -454,7 +466,7 @@
     }
 
     function renderFloors() {
-      fTabs.innerHTML = '';
+      fTabs.replaceChildren();
       if (!state.building || B[state.building].floors.length < 2) return;
       B[state.building].floors.forEach(f => {
         const t = h('button', 'hm-floor', fTabs, f + ' эт.');
@@ -467,8 +479,8 @@
     function render() {
       renderFloors();
       drawCampus();
-      svgWrap.innerHTML = '';
-      crumbs.innerHTML = '';
+      svgWrap.replaceChildren();
+      crumbs.replaceChildren();
       if (!state.building) {
         stage.hidden = true;
         return;
@@ -496,10 +508,15 @@
     function showCard(r) {
       const b = B[r.building], c = cat(r);
       card.hidden = false;
-      card.innerHTML = '';
+      card.replaceChildren();
       const close = h('button', 'hm-close', card, '×'); close.type = 'button';
       close.setAttribute('aria-label', 'Закрыть');
-      close.onclick = () => { state.selected = null; card.hidden = true; history.replaceState(null, '', location.pathname + location.search); render(); };
+      close.onclick = () => {
+        state.selected = null; card.hidden = true;
+        if (useHash) history.replaceState(null, '', location.pathname + location.search);
+        render();
+        if (opts.onClear) opts.onClear();
+      };
       h('div', 'hm-card-type t-' + c, card,
         c === 'dean' ? 'Деканат' : c === 'chair' ? 'Кафедра' : r.purpose ? 'Служебное помещение' : r.type);
       h('h3', null, card, r.purpose || `Аудитория ${r.number}`);
@@ -521,7 +538,7 @@
       bSel.value = r.building;
       showCard(r);
       render();
-      if (!silent) history.replaceState(null, '', '#room=' + encodeURIComponent(r.number));
+      if (!silent && useHash) history.replaceState(null, '', '#room=' + encodeURIComponent(r.number));
       if (opts.onSelect) opts.onSelect(r);
     }
 
@@ -534,7 +551,7 @@
 
     search.oninput = () => {
       const q = norm(search.value);
-      results.innerHTML = '';
+      results.replaceChildren();
       if (!q) { results.hidden = true; return; }
       const found = rooms.filter(r => norm(r.number).startsWith(q) || (r.purpose && norm(r.purpose).includes(q))
         || norm(r.type).startsWith(q)).slice(0, 8);
@@ -553,12 +570,18 @@
     };
     bSel.onchange = () => setView(bSel.value);
 
-    const m = location.hash.match(/room=([^&]+)/);
-    if (!(m && focus(decodeURIComponent(m[1])))) {
-      if (m) { notice.hidden = false; notice.textContent = `Аудитория «${decodeURIComponent(m[1])}» не найдена. Проверьте номер: в Главном корпусе он из 4 цифр, во Втором — из 3.`; }
+    const m = useHash ? location.hash.match(/room=([^&]+)/) : null;
+    let q = null;
+    if (m) { try { q = decodeURIComponent(m[1]); } catch { q = m[1]; } }   // битый %-код не роняет карту
+    if (!(q && focus(q))) {
+      if (q) { notice.hidden = false; notice.textContent = `Аудитория «${q}» не найдена. Проверьте номер: в Главном корпусе он из 4 цифр, во Втором — из 3.`; }
       render();
     }
-    return { focus, show: setView, rooms };
+    function destroy() {
+      root.replaceChildren();
+      root.classList.remove('hm');
+    }
+    return { focus, show: setView, destroy, rooms };
   }
 
   window.HogwartsMap = { mount };
