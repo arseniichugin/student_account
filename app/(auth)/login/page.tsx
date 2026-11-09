@@ -16,7 +16,7 @@ const FEATURES = [
 ];
 
 const DISCLAIMER =
-  "Университет «Горизонт» вымышлен. Это учебный прототип для конкурса, а не официальный сервис какого-либо вуза. Все данные — вымышленные.";
+  "Учебный прототип для конкурса, а не официальный сервис какого-либо вуза. Все данные — вымышленные.";
 
 export default async function LoginPage() {
   if (await getCurrentSession()) redirect("/");
@@ -28,7 +28,7 @@ export default async function LoginPage() {
         <HorizonArt />
         <div className="relative flex items-center gap-2">
           <Logo withText={false} inverse />
-          <span className="text-lg font-semibold">Горизонт · цифровой деканат</span>
+          <span className="text-lg font-semibold">Хогвартс · цифровой деканат</span>
         </div>
         <div className="relative my-auto max-w-md py-12">
           <p className="text-4xl leading-tight font-bold">Вся учёба — в одном месте</p>

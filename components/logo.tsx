@@ -26,7 +26,7 @@ export function Logo({
       </svg>
       {withText && (
         <span className="leading-tight">
-          <span className="block text-[15px] font-semibold text-text">Горизонт</span>
+          <span className="block text-[15px] font-semibold text-text">Хогвартс</span>
           <span className="block text-[11px] text-muted">цифровой деканат</span>
         </span>
       )}
