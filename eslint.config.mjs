@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Рабочие копии субагентов Claude Code и сгенерированный клиент Prisma
+    ".claude/**",
+    "lib/generated/**",
   ]),
 ]);
 
