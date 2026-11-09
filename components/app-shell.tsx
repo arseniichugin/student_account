@@ -2,7 +2,8 @@ import { LogOut } from "lucide-react";
 import Link from "next/link";
 import { ConceptBadge } from "@/components/concept-badge";
 import { Logo } from "@/components/logo";
-import { NavLinks, type NavItem } from "@/components/nav-links";
+import { NavLinks } from "@/components/nav-links";
+import type { NavItem } from "@/lib/navigation";
 import { logoutAction } from "@/lib/auth/actions";
 import { cn } from "@/lib/utils";
 

@@ -4,13 +4,14 @@ import { BackToScheduleButton } from "@/components/campus-map/back-button";
 import { CampusMapView } from "@/components/campus-map/campus-map-view";
 import { RetryButton } from "@/components/campus-map/retry-button";
 import { Card } from "@/components/ui/card";
-import { requireStudent } from "@/lib/auth/guards";
+import { requireUser } from "@/lib/auth/guards";
 import { loadCampusMap } from "@/lib/campus-map/load";
 
 export const metadata: Metadata = { title: "Карта" };
 
 export default async function MapPage({ searchParams }: PageProps<"/map">) {
-  await requireStudent();
+  // Карта — для любого вошедшего: студенту и сотруднику деканата.
+  await requireUser();
   const { room: roomParam } = await searchParams;
   const room = (Array.isArray(roomParam) ? roomParam[0] : roomParam)?.trim().slice(0, 100) || null;
   // Файл карты заменяемый: читаем при каждом запросе и проверяем структуру.

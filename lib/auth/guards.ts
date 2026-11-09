@@ -67,14 +67,24 @@ export const requireStaff = cache(async (): Promise<StaffContext> => {
  * но без входа их не показываем. Без сессии — на страницу входа.
  */
 export const requireUser = cache(async (): Promise<UserContext> => {
+  const ctx = await getUserContext();
+  if (!ctx) redirect("/login");
+  return ctx;
+});
+
+/**
+ * То же, что requireUser, но без редиректа: null, если не вошли.
+ * Для обработчиков API (app/api/*), которые должны ответить 401, а не перенаправить на страницу входа.
+ */
+export const getUserContext = cache(async (): Promise<UserContext | null> => {
   const session = await getCurrentSession();
-  if (!session) redirect("/login");
+  if (!session) return null;
 
   const user = await db.user.findUnique({
     where: { id: session.user.id },
     select: { student: { select: { facultyId: true } }, staff: { select: { facultyId: true } } },
   });
-  if (!user || (!user.student && !user.staff)) redirect("/login");
+  if (!user || (!user.student && !user.staff)) return null;
 
   return {
     userId: session.user.id,
