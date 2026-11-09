@@ -1,10 +1,12 @@
 import "server-only";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { z } from "zod";
 import { campusMapSchema, describeIssues, type CampusMapData } from "./schema";
 
 const FILE_NAME = "campus-map.json";
 const MAX_BYTES = 5 * 1024 * 1024;
+const ruErrors = z.locales.ru().localeError;
 
 export type CampusMapResult = { ok: true; data: CampusMapData } | { ok: false; error: string };
 
@@ -37,7 +39,8 @@ export async function loadCampusMap(): Promise<CampusMapResult> {
     return { ok: false, error: `файл ${FILE_NAME} повреждён (это не JSON)` };
   }
 
-  const parsed = campusMapSchema.safeParse(json);
+  // Сообщения по-русски только для этой проверки: глобальные настройки Zod не трогаем.
+  const parsed = campusMapSchema.safeParse(json, { error: ruErrors });
   if (!parsed.success) {
     return { ok: false, error: `в файле ${FILE_NAME} неверные данные — ${describeIssues(parsed.error)}` };
   }

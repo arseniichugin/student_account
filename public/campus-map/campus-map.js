@@ -185,11 +185,11 @@
       ].forEach(pth => line(pth, 'hm-iso-road'));
       const st = ISO(230, 410, 0);
       el('text', { x: st[0], y: st[1] + 26, class: 'hm-iso-street-t', 'text-anchor': 'middle', transform: `rotate(30 ${st[0]} ${st[1] + 26})` }, svg, 'Замковая ул.');
+      const ids = Object.keys(BOXES).filter(id => own(B, id));   // корпуса, которых нет в данных, не рисуем
       const all = [];
       ids.forEach(id => BOXES[id].forEach(bx => all.push({ id, bx })));
       all.sort((a, b) => (a.bx[0] + a.bx[1] + a.bx[2] + a.bx[3]) - (b.bx[0] + b.bx[1] + b.bx[2] + b.bx[3]));
       const groups = {};
-      const ids = Object.keys(BOXES).filter(id => own(B, id));   // корпуса, которых нет в данных, не рисуем
       ids.forEach(id => {
         const g = el('g', { class: 'hm-iso-bld' + (state.building === id ? ' sel' : ''), tabindex: 0, role: 'button', 'aria-label': B[id].name });
         g.onclick = () => setView(id);
