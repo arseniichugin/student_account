@@ -195,13 +195,19 @@ campus-map.json┘     + перекрёстные проверки (группы
 ```
 app/
   (auth)/login/          страница входа
-  (student)/             кабинет студента: today, requests, profile (+ schedule, grades, notifications — этап 3)
-  (staff)/staff/         кабинет сотрудника: заявки факультета
+  (app)/                 кабинет: общая оболочка, меню по роли (lib/navigation.ts), error.tsx
+    (student)/           студент: today («Мой день»), requests, profile
+    (staff)/staff/       сотрудник: заявки факультета
+    schedule/            расписание группы / преподавателя — обе роли
+    map/                 карта кампуса — обе роли
+  api/schedule/search/   подсказки поиска (401 без сессии)
 lib/
   auth/                  сессии, хеширование, ограничение попыток, requireStudent / requireStaff / requireUser
   data/                  доступ к данным с проверкой владельца (schedule.ts — расписание)
   university-data/       разбор, проверка и импорт файлов вуза
   moscow-time.ts         даты и время по Москве
+  schedule/              чистые функции экранов расписания (даты, подписи, адреса)
+  navigation.ts          меню для каждой роли
   validation/            схемы Zod
   generated/prisma/      клиент Prisma (генерируется, не коммитится)
 components/              UI-компоненты

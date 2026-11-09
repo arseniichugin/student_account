@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 // «Оптимистичная» проверка: без cookie сессии сразу отправляем на вход,
 // не нагружая сервер рендерингом страницы. Это НЕ защита данных —
-// настоящая проверка сессии и прав выполняется на сервере в requireStudent() / requireStaff().
+// настоящая проверка сессии и прав выполняется на сервере в requireStudent() / requireStaff() / requireUser().
 export function proxy(request: NextRequest) {
   if (!request.cookies.has("sid")) {
     return NextResponse.redirect(new URL("/login", request.url));
@@ -11,5 +11,6 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/today/:path*", "/requests/:path*", "/profile/:path*", "/staff/:path*"],
+  // API (/api/*) сюда не входит: обработчик сам отвечает 401 без сессии, а не перенаправляет.
+  matcher: ["/today/:path*", "/schedule/:path*", "/map/:path*", "/requests/:path*", "/profile/:path*", "/staff/:path*"],
 };

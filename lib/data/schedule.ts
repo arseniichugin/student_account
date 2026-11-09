@@ -279,6 +279,22 @@ export async function getGroupSchedule(
   };
 }
 
+/**
+ * Академические группы факультета по курсам — для экрана «Расписание» без выбранной цели
+ * (сотрудник видит группы своего факультета). Неизвестный факультет → пустой список.
+ */
+export async function listFacultyGroups(
+  _ctx: UserContext,
+  facultyId: string,
+): Promise<{ id: string; name: string; course: number | null }[]> {
+  if (facultyId.length === 0 || facultyId.length > 64) return [];
+  return db.group.findMany({
+    where: { facultyId, kind: "ACADEMIC" },
+    orderBy: [{ course: "asc" }, { name: "asc" }],
+    select: { id: true, name: true, course: true },
+  });
+}
+
 /** Расписание преподавателя за период. Неизвестный преподаватель → null. */
 export async function getTeacherSchedule(
   _ctx: UserContext,

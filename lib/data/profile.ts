@@ -16,7 +16,7 @@ export async function getMyStudentProfile(ctx: StudentContext) {
       user: { select: { login: true } },
       faculty: { select: { name: true, code: true } },
       program: { select: { name: true } },
-      academicGroup: { select: { name: true } },
+      academicGroup: { select: { id: true, name: true } },
       languageGroups: { orderBy: { position: "asc" }, select: { group: { select: { name: true } } } },
     },
   });
