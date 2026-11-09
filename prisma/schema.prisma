@@ -1,5 +1,7 @@
 // Схема базы данных «Цифрового деканата».
-// Все данные в базе — вымышленные (см. prisma/seed.ts).
+// Все данные в базе — вымышленные. Структура вуза, студенты и расписание загружаются
+// из заменяемых файлов data/university/* командой `npm run data:import`
+// (код импорта — lib/university-data/), демо-контент — prisma/seed.ts.
 // Описание сущностей и правил доступа — docs/ARCHITECTURE.md.
 
 generator client {
@@ -24,6 +26,8 @@ model User {
   /// Хеш argon2id. Пароль в открытом виде нигде не хранится.
   passwordHash String
   role         Role
+  /// Тестовый аккаунт для жюри: импорт при каждом запуске ставит ему пароль из DEMO_PASSWORD.
+  isDemo       Boolean  @default(false)
   createdAt    DateTime @default(now())
 
   student       Student?
@@ -57,51 +61,108 @@ model LoginAttempt {
   @@index([ip, createdAt])
 }
 
-// ─── Структура вуза ─────────────────────────────────────────────────
+// ─── Структура вуза (из students.csv и schedule.csv) ────────────────
 
 model Faculty {
-  id       String    @id @default(cuid())
-  name     String    @unique
-  /// Короткое название: «ФИТ»
-  short    String
-  programs Program[]
-  staff    Staff[]
+  id            String         @id @default(cuid())
+  /// Код из колонки «Код факультета»: «ГР»
+  code          String         @unique
+  /// «Факультет Гриффиндор»
+  name          String
+  /// Порядок первого появления в students.csv (факультет №1, №2…)
+  sortOrder     Int            @default(0)
+  programs      Program[]
+  groups        Group[]
+  students      Student[]
+  staff         Staff[]
+  announcements Announcement[]
 }
 
-/// Направление подготовки
+/// Направление подготовки (колонка «Направление»)
 model Program {
-  id        String  @id @default(cuid())
-  code      String
+  id        String    @id @default(cuid())
   name      String
   facultyId String
-  faculty   Faculty @relation(fields: [facultyId], references: [id])
-  groups    Group[]
+  faculty   Faculty   @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+  students  Student[]
+
+  @@unique([facultyId, name])
 }
 
+enum GroupKind {
+  /// Академическая группа: «1-ГР-1»
+  ACADEMIC
+  /// Языковая подгруппа академической группы: «1-ГР-1 (5)»
+  LANGUAGE
+  /// Группа есть в расписании, но не указана ни у одного студента и не похожа на языковую
+  OTHER
+}
+
+/// Группа — как в колонке `group` расписания. Группы из расписания без студентов тоже хранятся.
 model Group {
-  id        String     @id @default(cuid())
-  name      String     @unique
-  course    Int
-  programId String
-  program   Program    @relation(fields: [programId], references: [id])
-  students  Student[]
-  lessons   Lesson[]
-  deadlines Deadline[]
+  id            String         @id @default(cuid())
+  name          String         @unique
+  /// groupOid из schedule.csv (если был)
+  oid           String?
+  kind          GroupKind
+  /// Курс и факультет: у академической — по её студентам, у языковой — как у родительской группы
+  course        Int?
+  facultyId     String?
+  faculty       Faculty?       @relation(fields: [facultyId], references: [id], onDelete: SetNull)
+  /// Для языковой группы — академическая группа, частью которой она является
+  parentId      String?
+  parent        Group?         @relation("GroupParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children      Group[]        @relation("GroupParent")
+  /// Студенты, у которых это академическая группа
+  students      Student[]
+  /// Студенты, у которых это языковая группа
+  members       StudentGroup[]
+  lessons       LessonGroup[]
+  deadlines     Deadline[]
+  announcements Announcement[]
+
+  @@index([facultyId, course])
 }
 
 model Student {
-  id           String    @id @default(cuid())
-  userId       String    @unique
-  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  groupId      String
-  group        Group     @relation(fields: [groupId], references: [id])
-  lastName     String
-  firstName    String
-  middleName   String?
+  id              String         @id @default(cuid())
+  /// «ID студента» из students.csv — по нему повторный импорт находит студента
+  externalId      String         @unique
+  userId          String         @unique
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastName        String
+  firstName       String
+  middleName      String?
+  email           String         @unique
   /// Номер зачётной книжки (вымышленный)
-  recordBookNo String    @unique
-  grades       Grade[]
-  requests     Request[]
+  recordBookNo    String         @unique
+  course          Int
+  facultyId       String
+  faculty         Faculty        @relation(fields: [facultyId], references: [id])
+  programId       String
+  program         Program        @relation(fields: [programId], references: [id])
+  academicGroupId String
+  academicGroup   Group          @relation(fields: [academicGroupId], references: [id])
+  /// Языковые группы (0–2), в порядке колонок «Языковая группа 1/2»
+  languageGroups  StudentGroup[]
+  grades          Grade[]
+  requests        Request[]
+
+  @@index([facultyId])
+  @@index([academicGroupId])
+}
+
+/// Студент ↔ языковая группа
+model StudentGroup {
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  groupId   String
+  group     Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  /// 1 или 2 — номер колонки «Языковая группа N»
+  position  Int
+
+  @@id([studentId, groupId])
+  @@index([groupId])
 }
 
 model Staff {
@@ -109,67 +170,143 @@ model Staff {
   userId    String  @unique
   user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   facultyId String
-  faculty   Faculty @relation(fields: [facultyId], references: [id])
+  faculty   Faculty @relation(fields: [facultyId], references: [id], onDelete: Cascade)
   fullName  String
   position  String
 }
 
+// ─── Расписание (из schedule.csv и campus-map.json; при импорте заменяется целиком) ─
+
 model Teacher {
-  id       String   @id @default(cuid())
-  fullName String
-  lessons  Lesson[]
+  id        String    @id @default(cuid())
+  /// lecturerOid из schedule.csv (если пуст — краткое ФИО)
+  oid       String    @unique
+  /// «Арсеньева П.Н.»
+  shortName String
+  /// «Арсеньева Полина Николаевна»
+  fullName  String
+  /// «ст. преподаватель»
+  rank      String?
+  email     String?
+  lessons   Lesson[]
 }
 
-model Subject {
+model Building {
+  id      String   @id @default(cuid())
+  /// id корпуса на карте («main») или, если корпуса нет на карте, его название из расписания
+  key     String   @unique
+  name    String   @unique
+  abbr    String?
+  address String?
+  /// Этажи, крылья и схема нумерации — для карты
+  floors  Int[]
+  wings   Json?
+  maxRoom Int?
+  scheme  String?
+  /// Корпус есть в campus-map.json
+  onMap   Boolean  @default(false)
+  rooms   Room[]
+  lessons Lesson[]
+}
+
+model Room {
+  id         String    @id @default(cuid())
+  /// Номер — как в колонке auditorium расписания и на карте: «4144», «Манеж-1»
+  number     String    @unique
+  buildingId String?
+  building   Building? @relation(fields: [buildingId], references: [id], onDelete: SetNull)
+  type       String?
+  capacity   Int?
+  floor      Int?
+  wing       Int?
+  /// Назначение служебного помещения: «Деканат», «Библиотека»
+  purpose    String?
+  /// Можно ли ставить занятия
+  bookable   Boolean   @default(true)
+  /// Аудитория есть на карте кампуса
+  onMap      Boolean   @default(false)
+  lessons    Lesson[]
+}
+
+model Discipline {
   id        String     @id @default(cuid())
   name      String     @unique
+  /// disciplineOid из schedule.csv (если был)
+  oid       String?
   lessons   Lesson[]
   grades    Grade[]
   deadlines Deadline[]
-}
-
-// ─── Расписание ─────────────────────────────────────────────────────
-
-enum LessonType {
-  LECTURE
-  SEMINAR
-  LAB
 }
 
 enum LessonStatus {
   NORMAL
   MOVED
   CANCELLED
+  /// Замена преподавателя
+  REPLACED
 }
 
+/// Занятие. Лекция потока — ОДНА запись, связанная с несколькими группами (LessonGroup).
 model Lesson {
-  id               String       @id @default(cuid())
-  groupId          String
-  group            Group        @relation(fields: [groupId], references: [id])
-  subjectId        String
-  subject          Subject      @relation(fields: [subjectId], references: [id])
-  teacherId        String
-  teacher          Teacher      @relation(fields: [teacherId], references: [id])
-  type             LessonType
-  room             String
-  startsAt         DateTime
-  endsAt           DateTime
-  status           LessonStatus @default(NORMAL)
-  /// Для переносов: как было до изменения
-  originalStartsAt DateTime?
-  originalRoom     String?
+  id             String        @id @default(cuid())
+  /// lessonOid из schedule.csv
+  oid            String        @unique
+  /// Дата по Москве
+  date           DateTime      @db.Date
+  /// «09:00», «10:20» — по Москве
+  startTime      String
+  endTime        String
+  /// Те же моменты в UTC — для «следующей пары» и сортировки
+  startsAt       DateTime
+  endsAt         DateTime
+  pairStart      Int?
+  pairEnd        Int?
+  disciplineId   String
+  discipline     Discipline    @relation(fields: [disciplineId], references: [id])
+  /// Вид работы: «Лекция», «Практическое занятие», «Экзамен»…
+  kind           String
+  teacherId      String?
+  teacher        Teacher?      @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  /// Пусто — онлайн или без аудитории
+  roomId         String?
+  room           Room?         @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  buildingId     String?
+  building       Building?     @relation(fields: [buildingId], references: [id], onDelete: SetNull)
+  /// Поток: «1-ГР, поток 1»
+  stream         String?
+  subGroup       String?
+  /// Причина изменения: «Отмена: болезнь преподавателя»
+  note           String?
+  /// Ссылка на онлайн-занятие
+  url            String?
+  urlDescription String?
+  status         LessonStatus  @default(NORMAL)
+  groups         LessonGroup[]
 
-  @@index([groupId, startsAt])
+  @@index([date])
+  @@index([teacherId, date])
+}
+
+/// Занятие ↔ группа. Дата продублирована, чтобы выборка «группа + диапазон дат» шла по одному индексу.
+model LessonGroup {
+  lessonId String
+  lesson   Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  groupId  String
+  group    Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  date     DateTime @db.Date
+
+  @@id([lessonId, groupId])
+  @@index([groupId, date])
 }
 
 model Deadline {
-  id        String   @id @default(cuid())
-  groupId   String
-  group     Group    @relation(fields: [groupId], references: [id])
-  subjectId String?
-  subject   Subject? @relation(fields: [subjectId], references: [id])
-  title     String
-  dueAt     DateTime
+  id           String      @id @default(cuid())
+  groupId      String
+  group        Group       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  disciplineId String?
+  discipline   Discipline? @relation(fields: [disciplineId], references: [id], onDelete: SetNull)
+  title        String
+  dueAt        DateTime
 
   @@index([groupId, dueAt])
 }
@@ -184,16 +321,16 @@ enum GradeKind {
 }
 
 model Grade {
-  id        String    @id @default(cuid())
-  studentId String
-  student   Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  subjectId String
-  subject   Subject   @relation(fields: [subjectId], references: [id])
-  semester  Int
-  kind      GradeKind
+  id           String     @id @default(cuid())
+  studentId    String
+  student      Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  disciplineId String
+  discipline   Discipline @relation(fields: [disciplineId], references: [id])
+  semester     Int
+  kind         GradeKind
   /// Для экзамена: «2»–«5». Для зачёта: «зачтено» / «не зачтено». Пусто — ещё не сдано.
-  value     String?
-  date      DateTime?
+  value        String?
+  date         DateTime?
 
   @@index([studentId, semester])
 }
@@ -240,13 +377,15 @@ model Request {
 model Announcement {
   id          String   @id @default(cuid())
   authorId    String
-  author      User     @relation(fields: [authorId], references: [id])
+  author      User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
   title       String
   body        String
-  /// Аудитория: если поле пустое — для всех. Иначе — только для факультета / курса / группы.
+  /// Аудитория: если поля пустые — для всех. Иначе — только для факультета / курса / группы.
   facultyId   String?
+  faculty     Faculty? @relation(fields: [facultyId], references: [id], onDelete: Cascade)
   course      Int?
   groupId     String?
+  group       Group?   @relation(fields: [groupId], references: [id], onDelete: Cascade)
   publishedAt DateTime @default(now())
 
   @@index([publishedAt])

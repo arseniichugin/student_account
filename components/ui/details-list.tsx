@@ -11,7 +11,7 @@ export function DetailsList({ items, className }: { items: [string, React.ReactN
       {items.map(([label, value]) => (
         <div key={label} className="grid grid-cols-1 gap-0.5 py-2.5 @md:grid-cols-[180px_minmax(0,1fr)] @md:gap-6">
           <dt className="text-sm text-muted @md:py-px">{label}</dt>
-          <dd className="text-[15px]">{value}</dd>
+          <dd className="text-[15px] break-words">{value}</dd>
         </div>
       ))}
     </dl>

@@ -29,17 +29,19 @@ export default async function ProfilePage() {
             </div>
             <div>
               <p className="text-[17px] font-semibold">{fullName}</p>
-              <p className="text-sm text-muted">Студент · Университет «Горизонт»</p>
+              <p className="text-sm text-muted">Студент · Хогвартс</p>
             </div>
           </div>
           <DetailsList
             className="mt-4"
             items={[
-              ["Факультет", p.group.program.faculty.name],
-              ["Направление", `${p.group.program.code} ${p.group.program.name}`],
-              ["Курс", String(p.group.course)],
-              ["Группа", p.group.name],
+              ["Факультет", p.faculty.name],
+              ["Направление", p.program.name],
+              ["Курс", String(p.course)],
+              ["Академическая группа", p.academicGroup.name],
+              ["Языковые группы", p.languageGroups.join(", ") || "—"],
               ["Номер зачётной книжки", p.recordBookNo],
+              ["Почта", p.email],
               ["Логин", p.user.login],
             ]}
           />

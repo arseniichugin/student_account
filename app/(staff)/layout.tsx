@@ -16,7 +16,7 @@ export default async function StaffLayout({ children }: LayoutProps<"/">) {
       homeHref="/staff"
       user={{
         name: `${firstName} ${lastName}`.trim(),
-        meta: `Деканат ${p.faculty.short}`,
+        meta: `Деканат ${p.faculty.code}`,
         initials: `${firstName[0] ?? ""}${lastName[0] ?? ""}`,
       }}
     >

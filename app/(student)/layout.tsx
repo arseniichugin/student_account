@@ -22,7 +22,7 @@ export default async function StudentLayout({ children }: LayoutProps<"/">) {
       homeHref="/today"
       user={{
         name: `${p.firstName} ${p.lastName}`,
-        meta: `${p.group.program.faculty.short} · ${p.group.course} курс · ${p.group.name}`,
+        meta: `${p.faculty.code} · ${p.course} курс · ${p.academicGroup.name}`,
         initials: `${p.firstName[0]}${p.lastName[0]}`,
       }}
     >

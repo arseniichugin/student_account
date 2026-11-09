@@ -6,7 +6,7 @@ import type { CreateRequestInput, UpdateRequestStatusInput } from "@/lib/validat
 
 // ПРАВИЛО: каждый запрос к заявкам содержит фильтр по владельцу.
 //   студент   → where.studentId = ctx.studentId
-//   сотрудник → where.student.group.program.facultyId = ctx.facultyId
+//   сотрудник → where.student.facultyId = ctx.facultyId
 // Если объект не найден с этим фильтром, функция возвращает null,
 // а страница показывает «Не найдено» — даже если заявка с таким id существует.
 
@@ -74,7 +74,7 @@ export async function createMyRequest(ctx: StudentContext, input: CreateRequestI
 // ─── Сотрудник деканата ─────────────────────────────────────────────
 
 function staffScope(ctx: StaffContext) {
-  return { student: { group: { program: { facultyId: ctx.facultyId } } } };
+  return { student: { facultyId: ctx.facultyId } };
 }
 
 export function listFacultyRequests(ctx: StaffContext, status?: RequestStatus) {
@@ -86,7 +86,7 @@ export function listFacultyRequests(ctx: StaffContext, status?: RequestStatus) {
       payload: true,
       staffComment: true,
       student: {
-        select: { lastName: true, firstName: true, middleName: true, group: { select: { name: true } } },
+        select: { lastName: true, firstName: true, middleName: true, academicGroup: { select: { name: true } } },
       },
     },
   });

@@ -100,7 +100,7 @@ export default async function StaffRequestsPage({ searchParams }: PageProps<"/st
                       <StatusBadge status={r.status} />
                     </div>
                     <p className="mt-0.5 text-sm">
-                      {s.lastName} {s.firstName} {s.middleName} · <span className="text-muted">{s.group.name}</span>
+                      {s.lastName} {s.firstName} {s.middleName} · <span className="text-muted">{s.academicGroup.name}</span>
                     </p>
                     <p className="mt-2 text-sm text-muted">
                       {formatDateTime(r.createdAt)}
