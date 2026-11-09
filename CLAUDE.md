@@ -42,7 +42,7 @@ Next.js 16 (App Router) + TypeScript · React 19 · Tailwind CSS 4 · PostgreSQL
   `@/lib/generated/prisma/client`, перечисления для клиентских компонентов — `@/lib/generated/prisma/enums`.
 - **React 19 и формы**: `<form action={...}>` после отправки сбрасывает поля к начальным значениям.
   Для форм, где после сохранения поля должны показывать новые значения, используй
-  `onSubmit` + `startTransition(() => formAction(formData))` (пример — `app/(staff)/staff/status-form.tsx`).
+  `onSubmit` + `startTransition(() => formAction(formData))` (пример — `app/(app)/(staff)/staff/status-form.tsx`).
 
 ## Язык
 
@@ -96,15 +96,22 @@ Next.js 16 (App Router) + TypeScript · React 19 · Tailwind CSS 4 · PostgreSQL
 
 ```
 app/(auth)/login/        вход
-app/(student)/           кабинет студента (layout проверяет requireStudent)
-app/(staff)/staff/       кабинет сотрудника деканата (requireStaff)
+app/(app)/               кабинет: layout (requireUser) рисует оболочку и меню по роли; error.tsx — «Повторить»
+app/(app)/(student)/     страницы студента: today, requests, profile (layout + КАЖДАЯ страница — requireStudent)
+app/(app)/(staff)/staff/ кабинет сотрудника деканата (requireStaff)
+app/(app)/schedule/      расписание группы/преподавателя — обе роли (requireUser)
+app/(app)/map/           карта кампуса — обе роли (requireUser)
+app/api/schedule/search/ подсказки поиска (getUserContext → 401 без сессии; студентов не возвращает)
+lib/navigation.ts        меню для каждой роли — ЕДИНСТВЕННОЕ место, где перечислены разделы
 lib/auth/                сессии, пароли, ограничение попыток, guards, серверные действия входа
 lib/data/                ЕДИНСТВЕННОЕ место запросов к базе из страниц; всё фильтруется по контексту
 lib/data/schedule.ts     расписание: личное (StudentContext), группы/преподавателя и поиск (UserContext)
 lib/validation/          схемы Zod
 lib/university-data/     разбор и проверка файлов вуза, импорт в базу (без server-only — нужен скрипту)
 lib/moscow-time.ts       даты «YYYY-MM-DD» и время по Москве
-components/ui/           базовые компоненты (Button, Input, Card…)
+lib/schedule/            чистые функции экранов расписания: разбор ?date/?view, «через N мин», адреса
+components/ui/           базовые компоненты (Button, Input, Card, EmptyState, Skeleton…)
+components/schedule/     LessonCard / LessonList, неделя, навигация по датам, поиск, скелетоны
 data/university/         ЗАМЕНЯЕМЫЕ файлы вуза: students.csv, schedule.csv, campus-map.json (+ README с форматом)
 scripts/                 import-university-data.ts — команда npm run data:import
 prisma/schema.prisma     схема базы; prisma/seed.ts — демо-контент поверх импорта (заявки, оценки, объявления)
