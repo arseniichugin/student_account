@@ -4,6 +4,7 @@
  * Даты — строки «YYYY-MM-DD», время — «HH:MM», всё по Москве (см. lib/moscow-time.ts).
  */
 import { addDaysIso, daysBetweenIso, isIsoDate, isoDateToDb, moscowDateTime } from "@/lib/moscow-time";
+import { plural } from "@/lib/utils";
 
 type SearchParam = string | string[] | undefined;
 
@@ -37,7 +38,7 @@ export function parseIdParam(value: SearchParam): string | null {
 }
 
 /** Все даты периода по порядку, включительно. */
-export function datesInRange(from: string, to: string): string[] {
+function datesInRange(from: string, to: string): string[] {
   const n = daysBetweenIso(from, to);
   return Array.from({ length: Math.max(n + 1, 0) }, (_, i) => addDaysIso(from, i));
 }
@@ -131,6 +132,11 @@ const shortWeekdayFmt = new Intl.DateTimeFormat("ru-RU", { weekday: "short", tim
 const dayMonthFmt = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", timeZone: "UTC" });
 const dayMonthYearFmt = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
 
+/** «10 ноября» */
+export function formatDayMonthLong(date: string): string {
+  return dayMonthFmt.format(isoDateToDb(date));
+}
+
 /** «вторник, 10 ноября» */
 export function formatDayLong(date: string): string {
   return longFmt.format(isoDateToDb(date));
@@ -154,11 +160,7 @@ export function formatWeekRange(from: string, to: string): string {
 
 /** «1 занятие», «3 занятия», «5 занятий», «21 занятие», «11 занятий». */
 export function lessonsCountLabel(n: number): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return `${n} занятие`;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${n} занятия`;
-  return `${n} занятий`;
+  return `${n} ${plural(n, ["занятие", "занятия", "занятий"])}`;
 }
 
 /** «1-я пара», «1–2 пары»; null — номер не указан. */

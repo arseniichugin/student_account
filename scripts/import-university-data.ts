@@ -16,6 +16,7 @@ import { createPrismaClient } from "../lib/prisma-client";
 import { DEFAULT_DEMO_PASSWORD, ImportError, importUniversityData, testLoginsFromEnv } from "../lib/university-data/import";
 import { loadUniversityData, universityDataDir } from "../lib/university-data/load";
 import { formatIssue } from "../lib/university-data/validate";
+import { plural } from "../lib/utils";
 
 const MAX_ERRORS_SHOWN = 30;
 const MAX_WARNINGS_SHOWN = 10;
@@ -48,7 +49,7 @@ async function main(): Promise<number> {
     console.error(`\nОшибки в файлах:`);
     for (const e of result.errors.slice(0, MAX_ERRORS_SHOWN)) console.error(`  ✖ ${formatIssue(e)}`);
     if (result.errorCount > MAX_ERRORS_SHOWN) console.error(`  …и ещё ${n(result.errorCount - MAX_ERRORS_SHOWN)}`);
-    console.error(`\nНайдено ${n(result.errorCount)} ${plural(result.errorCount, "ошибка", "ошибки", "ошибок")}, база не изменена.`);
+    console.error(`\nНайдено ${n(result.errorCount)} ${plural(result.errorCount, ["ошибка", "ошибки", "ошибок"])}, база не изменена.`);
     console.error("Исправьте файлы и запустите импорт ещё раз. Формат файлов — data/university/README.md.");
     return 1;
   }
@@ -57,7 +58,7 @@ async function main(): Promise<number> {
   console.log(
     `\nФайлы в порядке:\n` +
       `  students.csv     ${n(d.students.length)} студентов, факультетов ${d.faculties.length}, групп ${d.groups.length}\n` +
-      `  schedule.csv     ${n(d.scheduleRows)} ${plural(d.scheduleRows, "строка", "строки", "строк")} → ${n(d.lessons.length)} занятий, преподавателей ${d.teachers.length}, дисциплин ${d.disciplines.length}\n` +
+      `  schedule.csv     ${n(d.scheduleRows)} ${plural(d.scheduleRows, ["строка", "строки", "строк"])} → ${n(d.lessons.length)} занятий, преподавателей ${d.teachers.length}, дисциплин ${d.disciplines.length}\n` +
       `  campus-map.json  корпусов ${d.buildings.filter((b) => b.onMap).length}, аудиторий ${d.rooms.filter((r) => r.onMap).length}`,
   );
   if (checkOnly) {
@@ -96,7 +97,7 @@ async function main(): Promise<number> {
     for (const s of summary.staff) console.log(`  деканат  ${s.login.padEnd(30)} ${s.fullName}, ${s.faculty}`);
     console.log(process.env.DEMO_PASSWORD ? "  Пароль: из DEMO_PASSWORD" : `  Пароль: ${DEFAULT_DEMO_PASSWORD}`);
 
-    console.log(`\nЛогины и пароли (${n(summary.credentialsRows)} ${plural(summary.credentialsRows, "строка", "строки", "строк")}) записаны в ${summary.credentialsPath}`);
+    console.log(`\nЛогины и пароли (${n(summary.credentialsRows)} ${plural(summary.credentialsRows, ["строка", "строки", "строк"])}) записаны в ${summary.credentialsPath}`);
     console.log("  ⚠ Файл содержит пароли: НЕ коммитьте его и не публикуйте. Он уже есть в .gitignore и .dockerignore.");
     return 0;
   } catch (e) {
@@ -110,14 +111,6 @@ async function main(): Promise<number> {
   } finally {
     await db.$disconnect();
   }
-}
-
-function plural(count: number, one: string, few: string, many: string) {
-  const m10 = count % 10;
-  const m100 = count % 100;
-  if (m10 === 1 && m100 !== 11) return one;
-  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
-  return many;
 }
 
 main().then((code) => process.exit(code));

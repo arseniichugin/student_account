@@ -2,6 +2,7 @@ import "server-only";
 import { db } from "@/lib/db";
 import type { StaffContext, StudentContext } from "@/lib/auth/guards";
 import type { RequestStatus } from "@/lib/generated/prisma/client";
+import { REQUEST_STATUS_LABEL } from "@/lib/requests/status";
 import type { CreateRequestInput, UpdateRequestStatusInput } from "@/lib/validation/requests";
 
 // ПРАВИЛО: каждый запрос к заявкам содержит фильтр по владельцу.
@@ -108,18 +109,6 @@ export async function countFacultyRequestsByStatus(ctx: StaffContext) {
   return { counts, total };
 }
 
-const STATUS_LABELS: Record<RequestStatus, string> = {
-  SUBMITTED: "Подана",
-  IN_PROGRESS: "В работе",
-  READY: "Готова",
-  ISSUED: "Выдана",
-  REJECTED: "Отклонена",
-};
-
-export function requestStatusLabel(status: RequestStatus) {
-  return STATUS_LABELS[status];
-}
-
 /** Меняет статус заявки своего факультета и уведомляет студента. Чужая заявка → null. */
 export async function updateFacultyRequestStatus(ctx: StaffContext, input: UpdateRequestStatusInput) {
   const request = await db.request.findFirst({
@@ -138,7 +127,7 @@ export async function updateFacultyRequestStatus(ctx: StaffContext, input: Updat
       data: {
         userId: request.student.userId,
         type: "REQUEST_STATUS",
-        title: `${request.type.name}: ${STATUS_LABELS[input.status].toLowerCase()}`,
+        title: `${request.type.name}: ${REQUEST_STATUS_LABEL[input.status].toLowerCase()}`,
         body: input.comment || "Статус вашей заявки изменился.",
         link: `/requests/${request.id}`,
       },

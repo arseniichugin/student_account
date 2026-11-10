@@ -12,6 +12,7 @@ import "dotenv/config";
 import { createPrismaClient } from "../lib/prisma-client";
 import type { GradeKind, NotificationType, RequestStatus } from "../lib/generated/prisma/client";
 import { dbDateToIso, moscowDateTime } from "../lib/moscow-time";
+import { formatDayMonthLong } from "../lib/schedule/dates";
 
 const db = createPrismaClient();
 
@@ -39,8 +40,8 @@ function pick<T>(rand: () => number, items: readonly T[]): T {
 const msk = (y: number, m: number, d: number, hh = 12, mm = 0) =>
   moscowDateTime(`${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`, `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`);
 
-const RU_MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
-const ruDate = (iso: string) => `${Number(iso.slice(8, 10))} ${RU_MONTHS[Number(iso.slice(5, 7)) - 1]}`;
+/** «3 ноября» — тот же форматтер, что на экранах расписания. */
+const ruDate = formatDayMonthLong;
 
 // ─── Справочник заявок ──────────────────────────────────────────────
 

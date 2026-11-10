@@ -4,16 +4,15 @@ import { startTransition, useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Select, Textarea } from "@/components/ui/form";
 import type { RequestStatus } from "@/lib/generated/prisma/enums";
+import { REQUEST_STATUS_LABEL } from "@/lib/requests/status";
 import { cn } from "@/lib/utils";
+import { REQUEST_STATUSES } from "@/lib/validation/requests";
 import { updateStatusAction } from "./actions";
 
-const OPTIONS: { value: RequestStatus; label: string }[] = [
-  { value: "SUBMITTED", label: "Подана" },
-  { value: "IN_PROGRESS", label: "В работе" },
-  { value: "READY", label: "Готова" },
-  { value: "ISSUED", label: "Выдана" },
-  { value: "REJECTED", label: "Отклонена" },
-];
+const OPTIONS: { value: RequestStatus; label: string }[] = REQUEST_STATUSES.map((value) => ({
+  value,
+  label: REQUEST_STATUS_LABEL[value],
+}));
 
 export function StatusForm({
   requestId,

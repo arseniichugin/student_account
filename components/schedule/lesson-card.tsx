@@ -16,7 +16,7 @@ const STATUS: Record<Exclude<ScheduleLessonStatus, "normal">, { label: string; c
   replaced: { label: "Замена преподавателя", className: "bg-warning-soft text-warning", Icon: UserRoundCog },
 };
 
-export type LessonHighlight = { kind: "current" | "next"; label: string };
+type LessonHighlight = { kind: "current" | "next"; label: string };
 
 const badgeBase = "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium";
 

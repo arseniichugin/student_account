@@ -1,12 +1,13 @@
 import { Check, X } from "lucide-react";
 import type { RequestStatus } from "@/lib/generated/prisma/enums";
+import { REQUEST_STATUS_LABEL } from "@/lib/requests/status";
 import { cn } from "@/lib/utils";
 
-const STEPS: { status: RequestStatus; label: string; hint: string }[] = [
-  { status: "SUBMITTED", label: "Подана", hint: "Заявка в очереди деканата" },
-  { status: "IN_PROGRESS", label: "В работе", hint: "Специалист готовит документ" },
-  { status: "READY", label: "Готова", hint: "Можно забрать в деканате" },
-  { status: "ISSUED", label: "Выдана", hint: "Документ у вас" },
+const STEPS: { status: RequestStatus; hint: string }[] = [
+  { status: "SUBMITTED", hint: "Заявка в очереди деканата" },
+  { status: "IN_PROGRESS", hint: "Специалист готовит документ" },
+  { status: "READY", hint: "Можно забрать в деканате" },
+  { status: "ISSUED", hint: "Документ у вас" },
 ];
 
 /** Путь заявки: где она сейчас и что будет дальше. */
@@ -14,8 +15,8 @@ export function StatusTimeline({ status }: { status: RequestStatus }) {
   if (status === "REJECTED") {
     return (
       <ol className="space-y-0">
-        <Step label="Подана" hint="Заявка поступила в деканат" state="done" />
-        <Step label="Отклонена" hint="Причина — в комментарии деканата" state="rejected" last />
+        <Step label={REQUEST_STATUS_LABEL.SUBMITTED} hint="Заявка поступила в деканат" state="done" />
+        <Step label={REQUEST_STATUS_LABEL.REJECTED} hint="Причина — в комментарии деканата" state="rejected" last />
       </ol>
     );
   }
@@ -26,7 +27,7 @@ export function StatusTimeline({ status }: { status: RequestStatus }) {
       {STEPS.map((s, i) => (
         <Step
           key={s.status}
-          label={s.label}
+          label={REQUEST_STATUS_LABEL[s.status]}
           hint={s.hint}
           state={i < current ? "done" : i === current ? "current" : "todo"}
           last={i === STEPS.length - 1}
