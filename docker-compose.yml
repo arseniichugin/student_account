@@ -1,5 +1,6 @@
 # Локально:   docker compose up -d db          — только база, приложение через npm run dev
-# На сервере: docker compose run --rm migrate  — миграции + импорт data/university + демо-данные
+# На сервере: mkdir -m 700 secrets             — папка для логинов и паролей, которые выдаёт импорт
+#             docker compose run --rm migrate  — миграции + импорт data/university + демо-данные
 #             docker compose up -d app         — приложение и база
 #
 # Пароль базы берётся из файла .env (POSTGRES_PASSWORD) и не хранится в репозитории.
@@ -33,12 +34,14 @@ services:
       DATABASE_URL: postgresql://student_account:${POSTGRES_PASSWORD}@db:5432/student_account
       DEMO_PASSWORD: ${DEMO_PASSWORD:-}
       TEST_STUDENT_LOGINS: ${TEST_STUDENT_LOGINS:-}
-      # Логины и пароли студентов импорт пишет в ./credentials.csv на сервере (не в образ).
+      # Логины и пароли студентов импорт пишет в ./secrets/credentials.csv на сервере (не в образ).
       CREDENTIALS_FILE: /out/credentials.csv
     volumes:
       # Файлы вуза берутся с диска сервера: заменили их — пересобирать образ не нужно.
       - ./data/university:/app/data/university:ro
-      - ./:/out
+      # Только отдельная папка для credentials.csv: контейнер работает от root,
+      # и доступ на запись ко всему проекту ему не нужен. Создайте её заранее: mkdir -m 700 secrets
+      - ./secrets:/out
     depends_on:
       db:
         condition: service_healthy

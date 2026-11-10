@@ -5,7 +5,7 @@
  */
 import { randomInt } from "node:crypto";
 import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { parseCsv, toCsv } from "./csv";
+import { CsvSyntaxError, parseCsv, toCsv } from "./csv";
 
 /** Без похожих символов: нет 0/O/o, 1/l/I/i. */
 const ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -73,4 +73,65 @@ export function discardCredentials(tmp: string) {
   } catch {
     // файла могло и не быть
   }
+}
+
+export type CredentialsRecovery = {
+  /** Строк из .tmp, перенесённых в основной файл (их пароли действуют в базе) */
+  recovered: number;
+  /** Строк из .tmp, чей пароль не подошёл к базе (транзакция того импорта не зафиксирована) */
+  skipped: number;
+  /** Файл .tmp не читается — переименован сюда, чтобы его можно было разобрать вручную */
+  brokenFile?: string;
+};
+
+/**
+ * Восстановление после сбоя прошлого импорта. Файл паролей пишется так: временный .tmp
+ * внутри транзакции → фиксация транзакции → переименование. Если процесс оборвался между
+ * фиксацией и переименованием, новые пароли уже действуют в базе, но лежат только в .tmp.
+ *
+ * Поэтому при старте импорта, если .tmp существует, он объединяется с основным файлом.
+ * Строка из .tmp берётся, только если её пароль подходит к хешу в базе (verify): если сбой
+ * случился ДО фиксации, пароли из .tmp недействительны и основной файл они не испортят.
+ * Возвращает null, если .tmp нет.
+ */
+export async function recoverCredentialsTemp(
+  path: string,
+  verify: (login: string, password: string) => Promise<boolean>,
+): Promise<CredentialsRecovery | null> {
+  const tmp = `${path}.tmp`;
+  if (!existsSync(tmp)) return null;
+
+  let pending: Map<string, CredentialRow>;
+  try {
+    pending = readCredentials(tmp);
+  } catch (e) {
+    if (!(e instanceof CsvSyntaxError)) throw e;
+    const brokenFile = `${tmp}.broken-${Date.now()}`;
+    renameSync(tmp, brokenFile);
+    return { recovered: 0, skipped: 0, brokenFile };
+  }
+
+  const main = readCredentials(path);
+  const rows = [...pending.values()];
+  const result: CredentialsRecovery = { recovered: 0, skipped: 0 };
+  // argon2 работает в пуле потоков — проверяем пачками
+  for (let i = 0; i < rows.length; i += 16) {
+    const part = rows.slice(i, i + 16);
+    const ok = await Promise.all(part.map((r) => (main.get(r.login)?.password === r.password ? true : verify(r.login, r.password))));
+    part.forEach((row, j) => {
+      if (!ok[j]) {
+        result.skipped++;
+        return;
+      }
+      if (main.get(row.login)?.password !== row.password) result.recovered++;
+      main.set(row.login, row);
+    });
+  }
+
+  // Основной файл — тоже через временный, чтобы сбой посреди записи его не испортил
+  const merged = `${path}.recover`;
+  writeFileSync(merged, credentialsCsv(main.values()), { encoding: "utf8", mode: 0o600 });
+  renameSync(merged, path);
+  unlinkSync(tmp);
+  return result;
 }

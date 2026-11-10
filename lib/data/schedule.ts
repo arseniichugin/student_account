@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import type { StudentContext, UserContext } from "@/lib/auth/guards";
 import type { LessonStatus, Prisma } from "@/lib/generated/prisma/client";
 import { addDaysIso, daysBetweenIso, dbDateToIso, isIsoDate, isoDateToDb, moscowToday } from "@/lib/moscow-time";
+import { safeExternalUrl } from "@/lib/safe-url";
 
 // Слой данных расписания.
 // ПРАВИЛА:
@@ -150,12 +151,12 @@ function toLesson(l: LessonRow): ScheduleLesson {
     roomFloor: l.room?.floor ?? null,
     building: l.building?.name ?? null,
     buildingAddress: l.building?.address ?? null,
-    isOnline: !l.room && !!l.url,
+    isOnline: !l.room && !!safeExternalUrl(l.url),
     teacher: l.teacher,
     groups: l.groups.map((g) => g.group).sort((a, b) => a.name.localeCompare(b.name, "ru")),
     stream: l.stream,
     note: l.note,
-    url: l.url,
+    url: safeExternalUrl(l.url), // только http(s): в href не попадёт javascript:
     urlDescription: l.urlDescription,
   };
 }
@@ -199,6 +200,14 @@ export async function listFaculties(ctx: UserContext): Promise<(FacultyOption & 
 }
 
 /**
+ * Prisma передаёт строку `contains` в ILIKE '%…%' как есть: «%» и «_» в запросе стали бы
+ * шаблоном («%» — «всё подряд»). Экранируем их и сам «\» — escape-символ LIKE в PostgreSQL по умолчанию.
+ */
+export function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
+/**
  * Поиск по группам и преподавателям (без студентов!). Регистр не важен.
  * facultyId — только группы этого факультета и преподаватели, у которых есть занятия с ними.
  */
@@ -211,7 +220,7 @@ export async function searchScheduleTargets(
   if (q === "") return [];
   const limit = Math.min(Math.max(options.limit ?? 20, 1), 50);
   const facultyId = options.facultyId || undefined;
-  const contains = { contains: q, mode: "insensitive" as const };
+  const contains = { contains: escapeLike(q), mode: "insensitive" as const };
 
   const [groups, teachers] = await Promise.all([
     db.group.findMany({

@@ -6,8 +6,7 @@ import { db } from "@/lib/db";
 import { getDummyHash, verifyPassword } from "@/lib/auth/password";
 import { isLoginRateLimited, markLoginAttemptSuccessful, startLoginAttempt } from "@/lib/auth/rate-limit";
 import { createSession, destroyCurrentSession, getCurrentSession } from "@/lib/auth/session";
-import { isDemoMode } from "@/lib/config";
-import { changeMyPassword } from "@/lib/data/account";
+import { PASSWORD_CHANGE_LOCK_MESSAGE, changeMyPassword, getPasswordChangeLock } from "@/lib/data/account";
 import { changePasswordSchema, loginSchema } from "@/lib/validation/auth";
 
 export type FormState = { error?: string; success?: string } | undefined;
@@ -64,8 +63,10 @@ export async function changePasswordAction(_prev: FormState, formData: FormData)
   const session = await getCurrentSession();
   if (!session) redirect("/login");
 
-  // Демо-аккаунты общие для всех посетителей (жюри): смена пароля закрыла бы вход остальным.
-  if (isDemoMode()) return { error: "В демо-версии смена пароля отключена: этими аккаунтами пользуются все посетители." };
+  // Тестовые аккаунты общие для всех посетителей (жюри): смена пароля закрыла бы вход остальным.
+  // Проверка на сервере — по DEMO_MODE и по флагу isDemo из базы; скрытая форма — не защита.
+  const lock = await getPasswordChangeLock(session.user.id);
+  if (lock) return { error: PASSWORD_CHANGE_LOCK_MESSAGE[lock] };
 
   // Подбор текущего пароля ограничен так же, как вход.
   const ip = await clientIp();
@@ -86,6 +87,7 @@ export async function changePasswordAction(_prev: FormState, formData: FormData)
     parsed.data.currentPassword,
     parsed.data.newPassword,
   );
+  if (result === "demo-mode" || result === "demo-account") return { error: PASSWORD_CHANGE_LOCK_MESSAGE[result] };
   if (result === "wrong-password") {
     await startLoginAttempt(session.user.login, ip); // неудачная попытка идёт в общий счётчик
     return { error: "Текущий пароль указан неверно" };

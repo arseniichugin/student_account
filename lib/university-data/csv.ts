@@ -113,9 +113,19 @@ export function parseCsv(input: string, delimiter?: string): CsvTable {
   };
 }
 
-/** Экранирует значение для CSV с разделителем «;». */
+/**
+ * Значение, которое Excel или LibreOffice прочтут как формулу: «=HYPERLINK(…)», «+1», «-1+…», «@SUM(…)»,
+ * а также начинающееся с табуляции или возврата каретки (CSV-инъекция, OWASP).
+ */
+const FORMULA_START = /^[=+\-@\t\r]/;
+
+/**
+ * Экранирует значение для CSV с разделителем «;». Значение, похожее на формулу,
+ * предваряется апострофом — таблица покажет его как текст, а не выполнит.
+ */
 export function csvEscape(value: string, delimiter = ";"): string {
-  return /["\n\r]/.test(value) || value.includes(delimiter) ? `"${value.replaceAll('"', '""')}"` : value;
+  const safe = FORMULA_START.test(value) ? `'${value}` : value;
+  return /["\n\r]/.test(safe) || safe.includes(delimiter) ? `"${safe.replaceAll('"', '""')}"` : safe;
 }
 
 /** Собирает CSV: UTF-8 с BOM (чтобы Excel открыл кириллицу), разделитель «;», переводы строк CRLF. */

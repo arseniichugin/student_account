@@ -3,6 +3,7 @@ import { ArrowRightLeft, ExternalLink, MapPin, PlayCircle, Timer, UserRound, Use
 import { MovedAwayCard } from "@/components/schedule/moved-away-card";
 import { buttonVariants } from "@/components/ui/button";
 import { roomMapHref } from "@/lib/campus-map/links";
+import { safeExternalUrl } from "@/lib/safe-url";
 import type { ScheduleLesson, ScheduleLessonStatus } from "@/lib/data/schedule";
 import type { MovedAwayLesson } from "@/lib/data/schedule-moves";
 import { pairLabel } from "@/lib/schedule/dates";
@@ -52,6 +53,8 @@ export function LessonCard({
   const groupsVisible = (showGroups ?? l.groups.length > 1) && l.groups.length > 0;
   const room = l.room ? roomLabel(l.room) : null;
   const teacherTitle = l.teacher ? [l.teacher.fullName, l.teacher.rank].filter(Boolean).join(", ") : "";
+  // Кнопка «Подключиться» — только для http(s): javascript: и прочее в href не попадёт
+  const onlineUrl = safeExternalUrl(l.url);
 
   return (
     <article
@@ -142,9 +145,9 @@ export function LessonCard({
               Онлайн
             </span>
           )}
-          {l.url && !cancelled && (
+          {onlineUrl && !cancelled && (
             <a
-              href={l.url}
+              href={onlineUrl}
               target="_blank"
               rel="noopener noreferrer"
               title={l.urlDescription ?? undefined}
@@ -155,7 +158,7 @@ export function LessonCard({
               <span className="sr-only">(откроется в новой вкладке)</span>
             </a>
           )}
-          {!room && !l.isOnline && !l.url && <span className="inline-flex min-h-11 items-center text-sm text-muted">Аудитория не указана</span>}
+          {!room && !l.isOnline && !onlineUrl && <span className="inline-flex min-h-11 items-center text-sm text-muted">Аудитория не указана</span>}
         </div>
       </div>
     </article>

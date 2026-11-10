@@ -55,6 +55,8 @@ tools/schedule-generator/out/
 # логины и пароли, которые создаёт импорт данных: ТОЛЬКО для раздачи, никогда не коммитить
 credentials.csv
 credentials.csv.tmp
+# папка для credentials.csv на сервере (docker compose run --rm migrate)
+secrets/
 
 # рабочие копии субагентов Claude Code (git worktree)
 .claude/worktrees/

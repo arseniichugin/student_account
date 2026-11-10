@@ -7,9 +7,11 @@
  *   группы, дисциплины, преподаватели, аудитории обновляются по ключу (id не меняются).
  * — Новым студентам выдаётся случайный пароль; тестовым аккаунтам и деканатам —
  *   пароль из DEMO_PASSWORD при каждом запуске. Пароли пишутся только в credentials.csv.
+ * — Студент, переставший быть тестовым, получает новый случайный пароль: демо-пароль
+ *   знают все посетители стенда.
  */
 import { randomUUID } from "node:crypto";
-import { hashPassword } from "../auth/password";
+import { hashPassword, verifyPassword } from "../auth/password";
 import { Prisma, type PrismaClient } from "../generated/prisma/client";
 import { isoDateToDb, moscowDateTime } from "../moscow-time";
 import {
@@ -20,6 +22,7 @@ import {
   discardCredentials,
   generatePassword,
   readCredentials,
+  recoverCredentialsTemp,
   writeCredentialsTemp,
   type CredentialRow,
 } from "./credentials";
@@ -68,6 +71,10 @@ export type ImportSummary = {
   lessonGroups: number;
   credentialsPath: string | null;
   credentialsRows: number;
+  /** Бывшие тестовые студенты, которым выдан новый случайный пароль */
+  resetTestStudents: number;
+  /** Что стоит проверить человеку: переиспользованные «ID студента», восстановленный файл паролей */
+  warnings: string[];
 };
 
 function chunks<T>(items: T[], size: number): T[][] {
@@ -108,21 +115,77 @@ export async function importUniversityData(
   }
   const testLogins = new Set(testStudents.map((s) => s.login));
 
+  const warnings: string[] = [];
+
+  // Прошлый импорт мог оборваться между фиксацией транзакции и переименованием файла паролей
+  if (options.credentialsPath) {
+    const recovery = await recoverCredentialsTemp(options.credentialsPath, async (login, password) => {
+      const user = await db.user.findUnique({ where: { login }, select: { passwordHash: true } });
+      return !!user && (await verifyPassword(user.passwordHash, password));
+    });
+    if (recovery?.brokenFile) {
+      warnings.push(`Файл паролей прошлого импорта (${options.credentialsPath}.tmp) повреждён и переименован в ${recovery.brokenFile} — проверьте его вручную.`);
+    } else if (recovery) {
+      warnings.push(
+        `Найден файл паролей незавершённого прошлого импорта (${options.credentialsPath}.tmp): ` +
+          `перенесено в основной файл строк ${recovery.recovered}, отброшено недействительных ${recovery.skipped}.`,
+      );
+    }
+  }
+
   const existing = await db.student.findMany({
-    select: { id: true, externalId: true, userId: true, user: { select: { login: true } } },
+    select: {
+      id: true,
+      externalId: true,
+      userId: true,
+      lastName: true,
+      firstName: true,
+      middleName: true,
+      user: { select: { login: true, isDemo: true } },
+    },
   });
   const existingByExt = new Map(existing.map((s) => [s.externalId, s]));
   const newStudents = data.students.filter((s) => !existingByExt.has(s.externalId));
   const keptStudents = data.students.filter((s) => existingByExt.has(s.externalId));
+  const credentials = options.credentialsPath ? readCredentials(options.credentialsPath) : new Map<string, CredentialRow>();
 
-  log(`Хеширую пароли: новых аккаунтов ${newStudents.length}, тестовых и деканатов ${testStudents.length + data.faculties.length}…`);
+  // «ID студента» тот же, а логин или ФИО другие — возможно, это уже другой человек.
+  // Его входы на других устройствах закрываем, а человеку показываем предупреждение.
+  const reassigned = keptStudents.flatMap((s) => {
+    const old = existingByExt.get(s.externalId)!;
+    const changed = [old.user.login !== s.login && "логин", fio(old) !== fio(s) && "ФИО"].filter(Boolean);
+    if (changed.length === 0) return [];
+    warnings.push(
+      `ID студента «${s.externalId}»: изменились ${changed.join(" и ")} (логин «${old.user.login}» → «${s.login}») — ` +
+        `сессии аккаунта закрыты, пароль прежний. Если это другой человек, выдайте ему новый пароль.`,
+    );
+    return [old.userId];
+  });
+
+  // Бывшие тестовые студенты: демо-пароль знают все посетители — выдаём новый случайный.
+  // Флаг isDemo — из базы; строка с демо-паролем или ролью «тестовый» в credentials.csv ловит
+  // аккаунты, с которых флаг сняли прежние версии импорта, не сменив пароль.
+  const demoPasswords = new Set([options.demoPassword, DEFAULT_DEMO_PASSWORD]);
+  const formerTest = keptStudents
+    .filter((s) => !testLogins.has(s.login))
+    .filter((s) => {
+      const old = existingByExt.get(s.externalId)!;
+      const row = credentials.get(old.user.login);
+      return old.user.isDemo || (!!row && (row.role === ROLE_TEST_STUDENT || demoPasswords.has(row.password)));
+    });
+
+  log(
+    `Хеширую пароли: новых аккаунтов ${newStudents.length}, тестовых и деканатов ${testStudents.length + data.faculties.length}` +
+      (formerTest.length ? `, бывших тестовых ${formerTest.length}` : "") +
+      "…",
+  );
   const newPasswords = newStudents.map((s) => (testLogins.has(s.login) ? options.demoPassword : generatePassword()));
   const newHashes = await hashAll(newPasswords);
   const demoHashes = await hashAll([...testStudents, ...data.faculties].map(() => options.demoPassword));
   const testHash = new Map(testStudents.map((s, i) => [s.login, demoHashes[i]!]));
   const staffHash = data.faculties.map((_, i) => demoHashes[testStudents.length + i]!);
-
-  const credentials = options.credentialsPath ? readCredentials(options.credentialsPath) : new Map<string, CredentialRow>();
+  const formerPasswords = formerTest.map(() => generatePassword());
+  const formerHashes = await hashAll(formerPasswords);
   const facultyName = new Map(data.faculties.map((f) => [f.code, f.name]));
   let tmpCredentials: string | null = null;
 
@@ -347,6 +410,7 @@ export async function importUniversityData(
         }
         for (const { old } of kept) credentials.delete(old.user.login);
         for (const row of movedCredentials) credentials.set(row.login, row);
+        if (reassigned.length) await tx.session.deleteMany({ where: { userId: { in: reassigned } } });
         const newUsers = [];
         const newStudentRows = [];
         for (const [i, s] of newStudents.entries()) {
@@ -368,15 +432,22 @@ export async function importUniversityData(
         );
         for (const part of chunks(memberships, 5000)) await tx.studentGroup.createMany({ data: part });
 
+        // Бывшие тестовые студенты: новый случайный пароль, без пометки, сессии закрыты
+        for (const [i, s] of formerTest.entries()) {
+          const { userId } = existingByExt.get(s.externalId)!;
+          await tx.user.update({ where: { id: userId }, data: { passwordHash: formerHashes[i]!, isDemo: false } });
+          await tx.session.deleteMany({ where: { userId } });
+          credentials.set(s.login, { login: s.login, fullName: fio(s), email: s.email, role: ROLE_STUDENT, password: formerPasswords[i]! });
+        }
         // Тестовые студенты: известный пароль при каждом импорте
         await tx.user.updateMany({ where: { role: "STUDENT", isDemo: true }, data: { isDemo: false } });
         for (const s of testStudents) {
           await tx.user.update({ where: { login: s.login }, data: { passwordHash: testHash.get(s.login)!, isDemo: true } });
           credentials.set(s.login, { login: s.login, fullName: fio(s), email: s.email, role: ROLE_TEST_STUDENT, password: options.demoPassword });
         }
-        // Бывшие тестовые студенты остаются в файле с прежним (демо-) паролем, но без пометки.
-        for (const row of credentials.values()) {
-          if (row.role === ROLE_TEST_STUDENT && !testLogins.has(row.login)) row.role = ROLE_STUDENT;
+        // Строка «тестовый» без тестового аккаунта в базе — с недействительным демо-паролем: убираем
+        for (const row of [...credentials.values()]) {
+          if (row.role === ROLE_TEST_STUDENT && !testLogins.has(row.login)) credentials.delete(row.login);
         }
 
         // Удаляем то, чего больше нет в файлах
@@ -447,5 +518,7 @@ export async function importUniversityData(
     lessonGroups: counts.lessonGroups,
     credentialsPath: options.credentialsPath,
     credentialsRows: options.credentialsPath ? credentials.size : 0,
+    resetTestStudents: formerTest.length,
+    warnings,
   };
 }

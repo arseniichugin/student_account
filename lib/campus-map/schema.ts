@@ -3,12 +3,14 @@ import { normalizeRoomNumber } from "./rooms";
 
 // Схема заменяемого файла data/university/campus-map.json.
 // Файл приходит извне (его можно подменить без пересборки), поэтому проверяем
-// структуру перед тем, как отдать данные карте. Лишние поля допустимы (looseObject):
-// генератор может добавлять новые сведения, не ломая кабинет.
+// структуру перед тем, как отдать данные карте. Лишние поля допустимы — генератор может
+// добавлять новые сведения, не ломая кабинет, — но z.object их ОТБРАСЫВАЕТ: данные уходят
+// в браузер (props клиентского компонента карты), и туда попадают только известные поля.
+// Новое поле для карты — сначала добавить в схему.
 
 const text = (max = 300) => z.string().trim().min(1).max(max);
 
-export const campusBuildingSchema = z.looseObject({
+export const campusBuildingSchema = z.object({
   id: text(64),
   name: text(),
   abbr: text(16),
@@ -18,7 +20,7 @@ export const campusBuildingSchema = z.looseObject({
   scheme: z.string().max(300).default(""),
 });
 
-export const campusRoomSchema = z.looseObject({
+export const campusRoomSchema = z.object({
   number: text(64),
   building: text(64),
   type: text(),
@@ -30,7 +32,7 @@ export const campusRoomSchema = z.looseObject({
 });
 
 export const campusMapSchema = z
-  .looseObject({
+  .object({
     buildings: z.array(campusBuildingSchema).min(1).max(50),
     rooms: z.array(campusRoomSchema).max(10_000),
   })
