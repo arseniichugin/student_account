@@ -4,12 +4,17 @@
  * Вуз (факультеты, группы, студенты, расписание) seed больше не создаёт: всё берётся из базы,
  * поэтому скрипт работает с любыми заменёнными файлами data/university/*.
  * Он пересоздаёт только демо-контент: оценки, заявки, объявления, уведомления, дедлайны.
+ * Оценки — только текущего семестра (lib/grades/term.ts): 1-й срез у всех, 2-й — примерно у половины пар
+ * «дисциплина × группа», 3-й срез и итоговые — пусто. Ставит «свой» преподаватель (TeachingAssignment).
  * Всё вымышленное; совпадения с реальными людьми случайны.
  *
  * Запуск: npm run db:seed (после npm run data:import). Повторный запуск даёт тот же результат.
  */
 import "dotenv/config";
 import type { NotificationType, RequestStatus } from "@/lib/generated/prisma/client";
+import { gradeNotification } from "@/lib/grades/notification";
+import { formatScored, scored } from "@/lib/grades/scale";
+import { checkpointLabel, semesterForCourse } from "@/lib/grades/term";
 import { dbDateToIso, moscowDateTime } from "@/lib/moscow-time";
 import { createPrismaClient } from "@/lib/prisma-client";
 import { formatDayMonthLong } from "@/lib/schedule/dates";
@@ -30,10 +35,6 @@ function rng(seed: string) {
     s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
     return s / 4294967296;
   };
-}
-
-function pick<T>(rand: () => number, items: readonly T[]): T {
-  return items[Math.floor(rand() * items.length)]!;
 }
 
 /** Дата и время по Москве. */
@@ -83,8 +84,6 @@ const REQUEST_TYPES = [
 
 type TypeCode = (typeof REQUEST_TYPES)[number]["code"];
 
-// Текущий учебный год: осенний семестр 2026 года.
-const ACADEMIC_YEAR_START = 2026;
 const LECTURE_KINDS = new Set(["Лекция", "Консультация", "Экзамен", "Зачёт"]);
 
 async function main() {
@@ -140,13 +139,6 @@ async function main() {
   }
   const disciplinesOf = (groupId: string) =>
     [...(groupDisciplines.get(groupId)?.keys() ?? [])].sort((a, b) => disciplines.get(a)!.localeCompare(disciplines.get(b)!, "ru"));
-  /** Дисциплины академических групп факультета на курсе — для оценок прошлых лет. */
-  const yearDisciplines = new Map<string, string[]>();
-  for (const g of groups) {
-    if (g.kind !== "ACADEMIC" || !g.facultyId || !g.course) continue;
-    const key = `${g.facultyId}:${g.course}`;
-    yearDisciplines.set(key, [...new Set([...(yearDisciplines.get(key) ?? []), ...disciplinesOf(g.id)])]);
-  }
 
   // Тестовые студенты — в том же порядке, в каком их выбирает импорт: факультет №1, №2, №3…
   const facultyOrder = new Map(faculties.map((f, i) => [f.id, i]));
@@ -173,9 +165,104 @@ async function main() {
   }
 
   // ─── Оценки ───────────────────────────────────────────────────────
-  // Оценки текущего семестра появятся вместе с назначениями преподавателей (следующий шаг).
-  const grades: unknown[] = [];
-  const debtSubject = new Map<string, string>();
+  console.log("Оценки…");
+  type SeedStudent = (typeof students)[number];
+  const membersOf = new Map<string, SeedStudent[]>();
+  for (const s of students) {
+    for (const g of [s.academicGroupId, ...s.languageGroups.map((x) => x.groupId)]) {
+      membersOf.set(g, [...(membersOf.get(g) ?? []), s]);
+    }
+  }
+  const groupName = new Map(groups.map((g) => [g.id, g.name]));
+  const assignments = await db.teachingAssignment.findMany({
+    orderBy: { teacherId: "asc" },
+    select: { teacherId: true, disciplineId: true, groupId: true, teacher: { select: { shortName: true, user: { select: { isDemo: true } } } } },
+  });
+  // Пары «дисциплина × группа» и их семинаристы (у трёх пар в данных — по двое)
+  const pairs = new Map<string, { disciplineId: string; groupId: string; teacherIds: string[] }>();
+  for (const a of assignments) {
+    const key = `${a.disciplineId}:${a.groupId}`;
+    const pair = pairs.get(key) ?? { disciplineId: a.disciplineId, groupId: a.groupId, teacherIds: [] };
+    pair.teacherIds.push(a.teacherId);
+    pairs.set(key, pair);
+  }
+  const teacherName = new Map(assignments.map((a) => [a.teacherId, a.teacher.shortName]));
+
+  // Тестовый преподаватель 1 — тот, кто ведёт семинары у тестового студента 1. Его пары с этим студентом
+  // остаются без 2-го среза: жюри само ставит оценку и видит её у студента.
+  const [t1, t2, t3] = testStudents;
+  const groupsOf = (s: SeedStudent) => new Set([s.academicGroupId, ...s.languageGroups.map((g) => g.groupId)]);
+  const t1Groups = t1 ? groupsOf(t1) : new Set<string>();
+  const testTeacher1 = assignments.find((a) => a.teacher.user?.isDemo && t1Groups.has(a.groupId))?.teacherId ?? null;
+  const keepSecondEmpty = (p: { groupId: string; teacherIds: string[] }) =>
+    !!testTeacher1 && p.teacherIds.includes(testTeacher1) && t1Groups.has(p.groupId);
+
+  // «Долг» тестового студента 2: FX за 1-й срез по первой по алфавиту дисциплине
+  const t2Pairs = t2 ? [...pairs.values()].filter((p) => groupsOf(t2).has(p.groupId)) : [];
+  const debtPair = t2Pairs.sort((a, b) => disciplines.get(a.disciplineId)!.localeCompare(disciplines.get(b.disciplineId)!, "ru"))[0];
+  const debtSubject = debtPair ? disciplines.get(debtPair.disciplineId)! : null;
+  const debtPoints = 45 + (t2 ? hash(`debt:${t2.externalId}`) % 12 : 0); // 45–56 — FX
+
+  const grades: {
+    studentId: string;
+    disciplineId: string;
+    semester: number;
+    kind: "CHECKPOINT";
+    checkpoint: number;
+    points: number;
+    gradedByTeacherId: string;
+    createdAt: Date;
+    updatedAt: Date;
+  }[] = [];
+  const seen = new Set<string>();
+  for (const pair of [...pairs.values()].sort((a, b) => a.disciplineId.localeCompare(b.disciplineId) || a.groupId.localeCompare(b.groupId))) {
+    const pairName = `${disciplines.get(pair.disciplineId)}|${groupName.get(pair.groupId)}`;
+    const teacherId = testTeacher1 && pair.teacherIds.includes(testTeacher1) ? testTeacher1 : pair.teacherIds[0]!;
+    // 2-й срез — примерно у половины пар, детерминированно по названиям (не по id: они меняются при пересоздании базы)
+    const second = !keepSecondEmpty(pair) && hash(`second:${pairName}`) % 2 === 0;
+    for (const s of membersOf.get(pair.groupId) ?? []) {
+      const key = `${s.id}:${pair.disciplineId}`;
+      if (seen.has(key)) continue; // студент в двух группах с одной дисциплиной — оценки одни
+      seen.add(key);
+      const rand = rng(`grades:${s.externalId}:${pairName}`);
+      // «Сильный» или «слабый» студент — от 64 до 95 в среднем; изредка FX у обычных студентов
+      const base = 64 + (hash(`ability:${s.externalId}`) % 32);
+      const points = () => {
+        if (!s.user.isDemo && rand() < 0.03) return 35 + Math.floor(rand() * 25);
+        const p = base + Math.round((rand() - 0.5) * 20);
+        return Math.max(60, Math.min(100, p));
+      };
+      const semester = semesterForCourse(s.course);
+      const first = s.id === t2?.id && pair === debtPair ? debtPoints : points();
+      const firstAt = msk(2026, 10, 5 + Math.floor(rand() * 5), 10 + Math.floor(rand() * 8));
+      grades.push({
+        studentId: s.id,
+        disciplineId: pair.disciplineId,
+        semester,
+        kind: "CHECKPOINT",
+        checkpoint: 1,
+        points: first,
+        gradedByTeacherId: teacherId,
+        createdAt: firstAt,
+        updatedAt: firstAt,
+      });
+      if (second) {
+        const secondAt = msk(2026, 11, 5 + Math.floor(rand() * 5), 10 + Math.floor(rand() * 8));
+        grades.push({
+          studentId: s.id,
+          disciplineId: pair.disciplineId,
+          semester,
+          kind: "CHECKPOINT",
+          checkpoint: 2,
+          points: points(),
+          gradedByTeacherId: teacherId,
+          createdAt: secondAt,
+          updatedAt: secondAt,
+        });
+      }
+    }
+  }
+  for (let i = 0; i < grades.length; i += 5000) await db.grade.createMany({ data: grades.slice(i, i + 5000) });
 
   // ─── Заявки ───────────────────────────────────────────────────────
   console.log("Заявки…");
@@ -198,7 +285,6 @@ async function main() {
     createdAt: Date;
   };
   const requests: RequestSeed[] = [];
-  const [t1, t2, t3] = testStudents;
   if (t1) {
     requests.push(
       {
@@ -220,7 +306,7 @@ async function main() {
     );
   }
   if (t2) {
-    const debt = debtSubject.get(t2.id);
+    const debt = debtSubject;
     requests.push(
       {
         studentId: t2.id,
@@ -237,8 +323,9 @@ async function main() {
         destination: "Для стажировки",
         copies: 2,
         staffComment: debt
-          ? `Есть академическая задолженность по дисциплине «${debt}». Выписка будет доступна после пересдачи.`
-          : "Есть академическая задолженность. Выписка будет доступна после пересдачи.",
+          ? `По дисциплине «${debt}» за 1-й срез стоит ${formatScored(scored(debtPoints))} — неудовлетворительно. ` +
+            "Пересдайте срез преподавателю и подайте заявку снова: выписку для стажировки выдаём без задолженностей."
+          : "Есть неудовлетворительная оценка за срез. Пересдайте её и подайте заявку снова.",
         createdAt: msk(2026, 11, 2, 13, 0),
       },
       {
@@ -464,6 +551,20 @@ async function main() {
         createdAt: msk(2026, 11, 8, 18, 0),
       });
     }
+    // Последняя выставленная оценка — уведомление того же вида, что создаёт журнал преподавателя
+    const myGrades = grades.filter((g) => g.studentId === s.id);
+    const latest = (s === t2 && debtPair ? myGrades.filter((g) => g.disciplineId === debtPair.disciplineId && g.checkpoint === 1) : myGrades)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+    if (latest) {
+      const n = gradeNotification({
+        discipline: disciplines.get(latest.disciplineId)!,
+        kind: "CHECKPOINT",
+        checkpoint: latest.checkpoint,
+        points: latest.points,
+        teacher: teacherName.get(latest.gradedByTeacherId),
+      });
+      notifications.push({ userId: s.userId, type: "GRADE", ...n, createdAt: latest.createdAt });
+    }
     const ann = announcements.find((a) => a.facultyId === s.facultyId && (a.course == null || a.course === s.course));
     if (ann) {
       notifications.push({ userId: s.userId, type: "ANNOUNCEMENT", title: ann.title, body: ann.body, createdAt: ann.publishedAt });
@@ -476,6 +577,14 @@ async function main() {
       `объявлений ${announcements.length}, уведомлений ${notifications.length}.`,
   );
   console.log(`Тестовые студенты: ${testStudents.map((s) => s.user.login).join(", ") || "нет (запустите npm run data:import)"}`);
+  if (debtSubject) console.log(`  долг у ${t2!.user.login}: «${debtSubject}», ${checkpointLabel(1)} — ${formatScored(scored(debtPoints))}`);
+  const emptySecond = [...pairs.values()].filter(keepSecondEmpty);
+  if (emptySecond.length) {
+    console.log(
+      `  без 2-го среза для жюри (тестовый преподаватель 1): ` +
+        emptySecond.map((p) => `${disciplines.get(p.disciplineId)} — ${groupName.get(p.groupId)}`).join("; "),
+    );
+  }
 }
 
 main()
