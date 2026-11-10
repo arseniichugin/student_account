@@ -11,5 +11,7 @@ coverage
 *.log
 # генераторы данных (в сборку кабинета не нужны; сами данные data/university — нужны для импорта)
 tools
-credentials.csv
-credentials.csv.tmp
+# логины и пароли, которые выдаёт импорт (в корне, в secrets/ и в любой подпапке), настройки Claude Code
+**/credentials.csv*
+secrets
+.claude
