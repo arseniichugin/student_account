@@ -69,6 +69,21 @@ export const requireStaff = cache(async (): Promise<StaffContext> => {
   return { userId: session.user.id, staffId: staff.id, facultyId: staff.facultyId } as StaffContext;
 });
 
+/**
+ * То же, что requireStaff, но без редиректа: null, если не вошли или вошли не сотрудником деканата.
+ * Для обработчиков API (app/api/staff/*): они отвечают 401/403, а не перенаправляют.
+ */
+export const getStaffContext = cache(async (): Promise<StaffContext | null> => {
+  const session = await getCurrentSession();
+  if (!session || session.user.role !== "STAFF") return null;
+  const staff = await db.staff.findUnique({
+    where: { userId: session.user.id },
+    select: { id: true, facultyId: true },
+  });
+  if (!staff) return null;
+  return { userId: session.user.id, staffId: staff.id, facultyId: staff.facultyId } as StaffContext;
+});
+
 /** Страница или действие только для преподавателя (журнал оценок, профиль преподавателя). */
 export const requireTeacher = cache(async (): Promise<TeacherContext> => {
   const session = await getCurrentSession();

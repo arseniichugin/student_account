@@ -2,7 +2,7 @@
  * Чистые функции экранов расписания (lib/schedule/*) и меню (lib/navigation.ts). База не нужна.
  */
 import { describe, expect, it } from "vitest";
-import { HOME, NAV, isNavActive } from "@/lib/navigation";
+import { HOME, NAV, activeNavHref, isNavActive } from "@/lib/navigation";
 import { moscowDateTime } from "@/lib/moscow-time";
 import {
   dayTiming,
@@ -175,9 +175,9 @@ describe("Адреса", () => {
 });
 
 describe("Меню", () => {
-  it("студент: 6 пунктов, сотрудник: 3, преподаватель: 4; расписание и карта — у всех", () => {
+  it("студент: 6 пунктов, сотрудник: 4, преподаватель: 4; расписание и карта — у всех", () => {
     expect(NAV.STUDENT.map((i) => i.href)).toEqual(["/today", "/schedule", "/grades", "/map", "/requests", "/profile"]);
-    expect(NAV.STAFF.map((i) => i.href)).toEqual(["/staff", "/schedule", "/map"]);
+    expect(NAV.STAFF.map((i) => i.href)).toEqual(["/staff", "/staff/grades", "/schedule", "/map"]);
     expect(NAV.TEACHER.map((i) => i.href)).toEqual(["/journal", "/schedule", "/map", "/teacher/profile"]);
     expect(HOME).toEqual({ STUDENT: "/today", STAFF: "/staff", TEACHER: "/journal" });
   });
@@ -192,5 +192,12 @@ describe("Меню", () => {
     expect(isNavActive("/requests", "/requests/abc")).toBe(true);
     expect(isNavActive("/staff", "/staff")).toBe(true);
     expect(isNavActive("/map", "/mapping")).toBe(false);
+  });
+
+  it("деканат: на «Успеваемости» подсвечена только она, а не «Заявки» (/staff)", () => {
+    expect(activeNavHref(NAV.STAFF, "/staff")).toBe("/staff");
+    expect(activeNavHref(NAV.STAFF, "/staff/grades")).toBe("/staff/grades");
+    expect(activeNavHref(NAV.STAFF, "/staff/grades/student/25%D0%A1%D0%9B0001")).toBe("/staff/grades");
+    expect(activeNavHref(NAV.STAFF, "/login")).toBeNull();
   });
 });

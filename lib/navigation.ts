@@ -24,6 +24,7 @@ export const NAV: Record<NavRole, NavItem[]> = {
   ],
   STAFF: [
     { href: "/staff", label: "Заявки", icon: "inbox" },
+    { href: "/staff/grades", label: "Успеваемость", icon: "grades" },
     { href: "/schedule", label: "Расписание", icon: "calendar" },
     { href: "/map", label: "Карта", icon: "map" },
   ],
@@ -39,7 +40,15 @@ export const NAV: Record<NavRole, NavItem[]> = {
 /** Главная страница кабинета для роли (логотип, корень сайта). */
 export const HOME: Record<NavRole, string> = { STUDENT: "/today", STAFF: "/staff", TEACHER: "/journal" };
 
-/** Активен ли пункт меню для текущего адреса: сам раздел или его подстраницы. */
+/** Подходит ли пункт меню к адресу: сам раздел или его подстраницы. */
 export function isNavActive(href: string, pathname: string): boolean {
   return pathname === href || pathname.startsWith(href + "/");
+}
+
+/**
+ * Какой пункт меню подсветить: из подходящих — самый длинный адрес. У деканата «Заявки» — /staff,
+ * а «Успеваемость» — /staff/grades: на /staff/grades/… активна только «Успеваемость».
+ */
+export function activeNavHref(items: readonly NavItem[], pathname: string): string | null {
+  return items.filter((i) => isNavActive(i.href, pathname)).sort((a, b) => b.href.length - a.href.length)[0]?.href ?? null;
 }
