@@ -8,7 +8,7 @@ import { WeekView } from "@/components/schedule/week-view";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/states";
-import { requireStudent, requireUser, type UserContext } from "@/lib/auth/guards";
+import { requireStudent, requireTeacher, requireUser, type UserContext } from "@/lib/auth/guards";
 import { UNIVERSITY_NAME } from "@/lib/config";
 import { getMyStudentProfile } from "@/lib/data/profile";
 import {
@@ -56,7 +56,8 @@ type Loaded =
 /**
  * Расписание любой группы или преподавателя (открытые данные вуза, только для вошедших).
  * Адрес: /schedule?group=<id> | ?teacher=<id>, &date=YYYY-MM-DD, &view=week|day.
- * Без цели: студенту — его расписание (академическая + его языковые группы), сотруднику — выбор группы.
+ * Без цели: студенту — его расписание (академическая + его языковые группы), преподавателю — его собственное,
+ * сотруднику — выбор группы.
  */
 export default async function SchedulePage({ searchParams }: PageProps<"/schedule">) {
   const ctx = await requireUser();
@@ -97,7 +98,7 @@ export default async function SchedulePage({ searchParams }: PageProps<"/schedul
         <ScheduleSearch faculties={faculties.map((f) => ({ id: f.id, name: f.name }))} date={linkDate} view={view} />
       </Card>
 
-      {target && ctx.role === "STUDENT" && (
+      {target && (ctx.role === "STUDENT" || ctx.role === "TEACHER") && (
         <Link
           href={scheduleHref({ date: linkDate, view })}
           className={buttonVariants({ variant: "ghost", className: "-ml-3" })}
@@ -337,6 +338,25 @@ async function load(
         lessons,
         movedAway,
         showTeacher: true,
+      };
+    }
+
+    if (ctx.role === "TEACHER") {
+      // Преподавателю по умолчанию — его расписание (id — из сессии, а не из адреса)
+      const teacher = await requireTeacher();
+      const [res, movedAway] = await Promise.all([
+        getTeacherSchedule(ctx, teacher.teacherId, from, to),
+        getTeacherMovedAway(ctx, teacher.teacherId, from, to),
+      ]);
+      if (!res) return { kind: "notFound", what: "teacher" };
+      return {
+        kind: "lessons",
+        title: "Моё расписание",
+        meta: <p>{[res.teacher.fullName, res.teacher.rank].filter(Boolean).join(" · ")}</p>,
+        lessons: res.lessons,
+        movedAway,
+        showTeacher: false,
+        showGroups: true,
       };
     }
 
