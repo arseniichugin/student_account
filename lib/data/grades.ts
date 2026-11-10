@@ -1,9 +1,10 @@
 import "server-only";
+import { takeActionLimit } from "@/lib/auth/action-limit";
 import { db } from "@/lib/db";
 import type { StudentContext, TeacherContext } from "@/lib/auth/guards";
 import type { GradeKind, Prisma } from "@/lib/generated/prisma/client";
 import { gradeNotification } from "@/lib/grades/notification";
-import { letterFor, overallAverage, scored, scoredAverage, type GradeLetter, type ScoredGrade } from "@/lib/grades/scale";
+import { formatCredit, letterFor, overallAverage, scored, scoredAverage, type GradeLetter, type ScoredGrade } from "@/lib/grades/scale";
 import { isFailingLetter, overallFromCheckpoints } from "@/lib/grades/stats";
 import {
   CHECKPOINTS,
@@ -132,18 +133,24 @@ export type Journal = {
 export type SaveGradesResult =
   | {
       ok: true;
-      /** Сколько оценок изменилось (новые, исправленные, стёртые) */
+      /** Сколько оценок выставлено или исправлено (студенту — уведомление) */
       saved: number;
+      /** Сколько оценок стёрто (без уведомления) */
+      cleared: number;
       /** Обновлённые строки журнала — для тех студентов, кого касалось сохранение */
       students: JournalStudent[];
       assignment: TeacherAssignment;
     }
   | {
       ok: false;
-      /** Общее сообщение («Журнал не найден», «Проверьте оценки») */
+      /** Общее сообщение («Журнал не найден», «Проверьте оценки», «Слишком много сохранений…») */
       error: string;
       /** Ошибки по полям: index — номер записи во входном entries */
       fieldErrors: { index: number; studentId: string | null; message: string }[];
+      /** Что-то изменили, пока преподаватель работал: свежие строки журнала этих студентов */
+      conflict?: { students: JournalStudent[]; assignment: TeacherAssignment };
+      /** Лимит частоты: через сколько секунд можно сохранить снова */
+      retryAfterSec?: number;
     };
 
 // ─── Помощники ──────────────────────────────────────────────────────
@@ -496,16 +503,57 @@ export async function getJournal(ctx: TeacherContext, assignmentId: string): Pro
 
 const NOT_FOUND: SaveGradesResult = { ok: false, error: "Журнал не найден", fieldErrors: [] };
 
+/**
+ * Лимит частоты сохранений на преподавателя: не больше 60 сохранений и 1000 оценок за 10 минут.
+ * Обычная работа (вся группа до ~30 человек × 4 колонки = 1–2 сохранения) далеко от порога,
+ * а скрипт или «залипшая» кнопка не завалят базу оценками и уведомлениями (общий демо-аккаунт).
+ */
+export const SAVE_LIMIT = { calls: 60, grades: 1000, windowMs: 10 * 60_000 } as const;
+
+function rateLimited(retryAfterMs: number): SaveGradesResult {
+  const minutes = Math.max(1, Math.ceil(retryAfterMs / 60_000));
+  return {
+    ok: false,
+    error: `Слишком много сохранений подряд. Подождите ${minutes} мин и сохраните снова — введённые оценки останутся в полях`,
+    fieldErrors: [],
+    retryAfterSec: Math.ceil(retryAfterMs / 1000),
+  };
+}
+
 const entryKey = (e: GradeEntryInput) => `${e.studentId}:${e.kind}:${e.kind === "CHECKPOINT" ? e.checkpoint : 0}`;
+const rowKey = (g: { studentId: string; semester: number; kind: GradeKind; checkpoint: number }) =>
+  `${g.studentId}:${g.semester}:${g.kind}:${g.checkpoint}`;
+
+/** Значение оценки для сравнения: баллы (срез, экзамен) или зачтено/не зачтено; null — нет оценки. */
+type GradeValue = number | boolean | null;
+const shownValue = (v: number | boolean) => (typeof v === "boolean" ? formatCredit(v) : String(v));
+
+function conflictMessage(expected: GradeValue, actual: GradeValue): string {
+  if (actual === null) return "Оценку уже стёрли";
+  if (expected === null) return `Оценку уже поставили: ${shownValue(actual)}`;
+  return `Оценку уже изменили: ${shownValue(actual)}`;
+}
+
+type FieldError = { index: number; studentId: string | null; message: string };
 
 /**
  * Сохраняет одну или несколько оценок журнала (строкой или колонкой). Ввод — недоверенный (из браузера):
  * проверяется Zod, затем на сервере — назначение принадлежит ctx.teacherId, каждый студент состоит в группе
  * назначения, экзамен/зачёт совпадает с итоговым контролем. Любая ошибка — не сохраняется ничего.
- * Изменённая оценка → уведомление GRADE студенту («Новая оценка: …», ссылка на /grades).
- * Демо-режим не мешает: ставить оценки — главный сценарий для жюри.
+ *
+ * Оптимистичная блокировка: если в записи указано `expected` (что видел преподаватель), а в базе уже другое
+ * (вторая вкладка, второй семинарист группы), — отказ с ошибкой у поля и свежими строками журнала, без
+ * тихой перезаписи. Сохранения по одной дисциплине идут по очереди (advisory-блокировка до конца транзакции),
+ * поэтому параллельные запросы не проскакивают мимо проверки и не плодят уведомления.
+ *
+ * Новая или исправленная оценка → уведомление GRADE студенту («Новая оценка: …», ссылка на /grades);
+ * стёртая — без уведомления. Лимит частоты — SAVE_LIMIT. Демо-режим не мешает: ставить оценки — главный
+ * сценарий для жюри.
  */
 export async function saveGrades(ctx: TeacherContext, input: unknown): Promise<SaveGradesResult> {
+  const calls = takeActionLimit(`grades-save:${ctx.teacherId}`, SAVE_LIMIT.calls, SAVE_LIMIT.windowMs);
+  if (!calls.ok) return rateLimited(calls.retryAfterMs);
+
   const parsed = saveGradesSchema.safeParse(input);
   if (!parsed.success) {
     const raw = (input as { entries?: unknown } | null)?.entries;
@@ -513,7 +561,7 @@ export async function saveGrades(ctx: TeacherContext, input: unknown): Promise<S
       .filter((i) => i.path[0] === "entries" && typeof i.path[1] === "number")
       .map((i) => {
         const index = i.path[1] as number;
-        const sid = Array.isArray(raw) ? (raw[index] as { studentId?: unknown } | undefined)?.studentId : null;
+        const sid = Array.isArray(raw) ? (raw[index] as { studentId?: unknown } | null | undefined)?.studentId : null;
         return { index, studentId: typeof sid === "string" ? sid.slice(0, 64) : null, message: i.message };
       });
     const general = parsed.error.issues.find((i) => !(i.path[0] === "entries" && typeof i.path[1] === "number"));
@@ -521,6 +569,9 @@ export async function saveGrades(ctx: TeacherContext, input: unknown): Promise<S
     return { ok: false, error: general?.message ?? "Проверьте оценки", fieldErrors };
   }
   const { assignmentId, entries } = parsed.data;
+
+  const volume = takeActionLimit(`grades-save-entries:${ctx.teacherId}`, SAVE_LIMIT.grades, SAVE_LIMIT.windowMs, entries.length);
+  if (!volume.ok) return rateLimited(volume.retryAfterMs);
 
   const a = await findMyAssignment(ctx, assignmentId);
   if (!a) return NOT_FOUND;
@@ -533,7 +584,7 @@ export async function saveGrades(ctx: TeacherContext, input: unknown): Promise<S
   const memberById = new Map(members.map((m) => [m.id, m]));
 
   const finalName = { EXAM: "экзамен", CREDIT: "зачёт" } as const;
-  const fieldErrors: { index: number; studentId: string | null; message: string }[] = [];
+  const fieldErrors: FieldError[] = [];
   const seen = new Set<string>();
   entries.forEach((e, index) => {
     const err = (message: string) => fieldErrors.push({ index, studentId: e.studentId, message });
@@ -551,56 +602,106 @@ export async function saveGrades(ctx: TeacherContext, input: unknown): Promise<S
   if (fieldErrors.length > 0) return { ok: false, error: "Проверьте оценки", fieldErrors };
 
   const teacher = await db.teacher.findUniqueOrThrow({ where: { id: ctx.teacherId }, select: { shortName: true } });
-  let saved = 0;
-  await db.$transaction(async (tx) => {
-    for (const e of entries) {
-      const s = memberById.get(e.studentId)!;
-      const key = {
-        studentId: s.id,
-        disciplineId: a.discipline.id,
-        semester: semesterForCourse(s.course),
-        kind: e.kind,
-        checkpoint: e.kind === "CHECKPOINT" ? e.checkpoint : 0,
-      };
-      const where = { studentId_disciplineId_semester_kind_checkpoint: key };
-      const old = await tx.grade.findUnique({ where, select: { points: true, passed: true } });
-      const value = e.kind === "CREDIT" ? { points: null, passed: e.passed } : { points: e.points, passed: null };
-      const empty = e.kind === "CREDIT" ? e.passed === null : e.points === null;
+  const keyOf = (e: GradeEntryInput) => {
+    const s = memberById.get(e.studentId)!;
+    return {
+      studentId: s.id,
+      disciplineId: a.discipline.id,
+      semester: semesterForCourse(s.course),
+      kind: e.kind,
+      checkpoint: e.kind === "CHECKPOINT" ? e.checkpoint : 0,
+    };
+  };
+  const semesters = [...new Set(members.map((m) => semesterForCourse(m.course)))];
 
-      if (empty) {
-        if (old) {
-          await tx.grade.delete({ where });
-          saved++;
-        }
-        continue;
-      }
-      if (old && old.points === value.points && old.passed === value.passed) continue;
-      await tx.grade.upsert({
-        where,
-        create: { ...key, ...value, gradedByTeacherId: ctx.teacherId },
-        update: { ...value, gradedByTeacherId: ctx.teacherId },
+  // Всё сохранение — 4–6 запросов при любом числе оценок: прочитать имеющиеся оценки одним запросом,
+  // сравнить в памяти, затем удалить / создать / исправить пачками и создать уведомления одним запросом.
+  const outcome = await db.$transaction(
+    async (tx) => {
+      // Сохранения по одной дисциплине — по очереди: блокировка держится до конца транзакции
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`grades:${a.discipline.id}`}::text, 0))`;
+      const existing = await tx.grade.findMany({
+        where: { disciplineId: a.discipline.id, studentId: { in: members.map((m) => m.id) }, semester: { in: semesters } },
+        select: { id: true, studentId: true, semester: true, kind: true, checkpoint: true, points: true, passed: true },
       });
-      saved++;
-      const n = gradeNotification(
-        e.kind === "CHECKPOINT"
-          ? { discipline: a.discipline.name, kind: "CHECKPOINT", checkpoint: e.checkpoint, points: e.points!, teacher: teacher.shortName }
-          : e.kind === "EXAM"
-            ? { discipline: a.discipline.name, kind: "EXAM", points: e.points!, teacher: teacher.shortName }
-            : { discipline: a.discipline.name, kind: "CREDIT", passed: e.passed!, teacher: teacher.shortName },
-      );
-      await tx.notification.create({ data: { userId: s.userId, type: "GRADE", ...n } });
-    }
-  });
+      const byKey = new Map(existing.map((g) => [rowKey(g), g]));
 
-  // Свежие строки журнала для затронутых студентов и карточка с новым прогрессом
+      const conflicts: FieldError[] = [];
+      const toDelete: string[] = [];
+      const toCreate: Prisma.GradeCreateManyInput[] = [];
+      const toUpdate = new Map<string, { value: { points: number | null; passed: boolean | null }; ids: string[] }>();
+      const notifications: Prisma.NotificationCreateManyInput[] = [];
+      let saved = 0;
+      let cleared = 0;
+
+      entries.forEach((e, index) => {
+        const key = keyOf(e);
+        const old = byKey.get(rowKey(key));
+        const oldValue: GradeValue = e.kind === "CREDIT" ? (old?.passed ?? null) : (old?.points ?? null);
+        const newValue: GradeValue = e.kind === "CREDIT" ? e.passed : e.points;
+        if (newValue === oldValue) return; // уже так — ничего не меняем и не уведомляем
+        if (e.expected !== undefined && e.expected !== oldValue) {
+          conflicts.push({ index, studentId: e.studentId, message: conflictMessage(e.expected, oldValue) });
+          return;
+        }
+        if (newValue === null) {
+          toDelete.push(old!.id);
+          cleared++;
+          return;
+        }
+        const value = e.kind === "CREDIT" ? { points: null, passed: e.passed } : { points: e.points, passed: null };
+        if (old) {
+          const k = JSON.stringify(value);
+          const group = toUpdate.get(k) ?? { value, ids: [] };
+          group.ids.push(old.id);
+          toUpdate.set(k, group);
+        } else {
+          toCreate.push({ ...key, ...value, gradedByTeacherId: ctx.teacherId });
+        }
+        saved++;
+        const n = gradeNotification(
+          e.kind === "CHECKPOINT"
+            ? { discipline: a.discipline.name, kind: "CHECKPOINT", checkpoint: e.checkpoint, points: e.points!, teacher: teacher.shortName }
+            : e.kind === "EXAM"
+              ? { discipline: a.discipline.name, kind: "EXAM", points: e.points!, teacher: teacher.shortName }
+              : { discipline: a.discipline.name, kind: "CREDIT", passed: e.passed!, teacher: teacher.shortName },
+        );
+        notifications.push({ userId: memberById.get(e.studentId)!.userId, type: "GRADE", ...n });
+      });
+      if (conflicts.length > 0) return { ok: false as const, conflicts };
+
+      if (toDelete.length > 0) await tx.grade.deleteMany({ where: { id: { in: toDelete } } });
+      if (toCreate.length > 0) await tx.grade.createMany({ data: toCreate });
+      // Исправления — по одному запросу на каждое новое значение, а не на каждую оценку
+      for (const { value, ids: gradeIds } of toUpdate.values()) {
+        await tx.grade.updateMany({ where: { id: { in: gradeIds } }, data: { ...value, gradedByTeacherId: ctx.teacherId } });
+      }
+      if (notifications.length > 0) await tx.notification.createMany({ data: notifications });
+      return { ok: true as const, saved, cleared };
+    },
+    // Явные сроки: ожидание соединения и сама транзакция (по умолчанию — 2 с и 5 с)
+    { maxWait: 5_000, timeout: 15_000 },
+  );
+
+  // Свежие строки журнала: после сохранения — затронутых студентов, при конфликте — студентов с конфликтом
+  // (журнал покажет, что уже стоит в базе)
   const { studentsOf, gradesOf, coTeachersOf } = await loadAssignmentData(ctx, [a]);
   const all = studentsOf(a.group.id);
   const assignment = toAssignment(a, all, gradesOf, coTeachersOf(a));
-  const touched = all.filter((m) => memberById.has(m.id)).sort(byName);
-  return {
-    ok: true,
-    saved,
-    students: touched.map((s) => toJournalStudent(s, gradesOf(s, a.discipline.id), assignment.final)),
-    assignment,
-  };
+  const rowsFor = (studentIds: Set<string>) =>
+    all
+      .filter((m) => studentIds.has(m.id))
+      .sort(byName)
+      .map((s) => toJournalStudent(s, gradesOf(s, a.discipline.id), assignment.final));
+
+  if (!outcome.ok) {
+    const n = outcome.conflicts.length;
+    return {
+      ok: false,
+      error: n === 1 ? "Эту оценку уже изменили, пока вы работали" : "Эти оценки уже изменили, пока вы работали",
+      fieldErrors: outcome.conflicts,
+      conflict: { students: rowsFor(new Set(outcome.conflicts.map((c) => c.studentId!))), assignment },
+    };
+  }
+  return { ok: true, saved: outcome.saved, cleared: outcome.cleared, students: rowsFor(new Set(memberById.keys())), assignment };
 }

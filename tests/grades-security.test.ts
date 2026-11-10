@@ -6,7 +6,9 @@
  *  — сохранённая оценка уведомляет студента.
  *
  * Нужна заполненная база: npm run db:setup. Аккаунты берутся из базы (тестовые студенты и преподаватели),
- * тест не зависит от конкретных файлов вуза. Всё, что тест меняет, он возвращает назад.
+ * тест не зависит от конкретных файлов вуза. Всё, что тест меняет, он возвращает назад: удаляет только
+ * те оценки и уведомления, которые создал сам (ключи собираются по ходу), и не полагается на то, какие
+ * ячейки seed оставил пустыми.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { StudentContext, TeacherContext } from "@/lib/auth/guards";
@@ -36,6 +38,10 @@ let ownStudent: { id: string; userId: string; course: number };
 let studentA: StudentContext; // тестовый студент 1 — в группе преподавателя
 let studentB: StudentContext; // тестовый студент 2
 const startedAt = new Date();
+/** Ячейки, куда тест ставил оценки, и студенты, которым уходили уведомления, — в конце убрать только их. */
+type GradeKey = { studentId: string; disciplineId: string; semester: number; kind: "CHECKPOINT" | "EXAM" | "CREDIT"; checkpoint: number };
+const touchedGrades: GradeKey[] = [];
+const notifiedUserIds = new Set<string>();
 const tempUserIds: string[] = [];
 const tempTeacherIds: string[] = [];
 
@@ -63,15 +69,39 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  // Оценки и уведомления, созданные тестом, — убрать
-  await db.notification.deleteMany({ where: { type: "GRADE", createdAt: { gte: startedAt } } });
-  await db.grade.deleteMany({ where: { createdAt: { gte: startedAt } } });
+  // Оценки и уведомления, созданные тестом, — убрать (и только их)
+  for (const key of touchedGrades) await db.grade.deleteMany({ where: { ...key, createdAt: { gte: startedAt } } });
+  await db.notification.deleteMany({ where: { type: "GRADE", userId: { in: [...notifiedUserIds] }, createdAt: { gte: startedAt } } });
   await db.teacher.deleteMany({ where: { id: { in: tempTeacherIds } } });
   await db.user.deleteMany({ where: { id: { in: tempUserIds } } });
   await db.$disconnect();
 });
 
 const gradeCount = (where: { studentId?: string; disciplineId?: string } = {}) => db.grade.count({ where });
+
+/**
+ * Пустая ячейка среза в группе own — ищется по базе, а не «3-й срез, его seed не ставит».
+ * Сначала — у тестового студента 1 (его оценку проверяем ещё и глазами студента).
+ */
+async function findEmptyCheckpoint() {
+  const members = await membersOf(own.groupId);
+  const ordered = [ownStudent, ...members.filter((m) => m.id !== ownStudent.id)];
+  const taken = await db.grade.findMany({
+    where: { disciplineId: own.disciplineId, studentId: { in: members.map((m) => m.id) }, kind: "CHECKPOINT" },
+    select: { studentId: true, semester: true, checkpoint: true },
+  });
+  for (const s of ordered) {
+    const semester = semesterForCourse(s.course);
+    for (const checkpoint of [3, 2, 1] as const) {
+      if (taken.some((g) => g.studentId === s.id && g.semester === semester && g.checkpoint === checkpoint)) continue;
+      const key: GradeKey = { studentId: s.id, disciplineId: own.disciplineId, semester, kind: "CHECKPOINT", checkpoint };
+      touchedGrades.push(key);
+      notifiedUserIds.add(s.userId);
+      return { student: s, checkpoint, key };
+    }
+  }
+  throw new Error("В группе тестового преподавателя нет ни одной пустой ячейки среза — пересоздайте демо-данные (npm run db:seed)");
+}
 
 describe("Преподаватель работает только со своими группами", () => {
   it("список журналов — только свои назначения, без чужих", async () => {
@@ -200,41 +230,37 @@ describe("Преподаватель работает только со свои
 
 describe("Сохранение и что видит студент", () => {
   it("оценка сохраняется от имени преподавателя из контекста, студент получает уведомление и видит её", async () => {
-    const semester = semesterForCourse(ownStudent.course);
-    const key = { studentId: ownStudent.id, disciplineId: own.disciplineId, semester, kind: "CHECKPOINT" as const, checkpoint: 3 };
-    const existing = await db.grade.findUnique({ where: { studentId_disciplineId_semester_kind_checkpoint: key } });
-    expect(existing).toBeNull(); // 3-й срез seed не ставит
+    const { student, checkpoint, key } = await findEmptyCheckpoint();
+    const entry = { studentId: student.id, kind: "CHECKPOINT" as const, checkpoint };
 
-    const result = await saveGrades(teacher, {
-      assignmentId: own.id,
-      entries: [{ studentId: ownStudent.id, kind: "CHECKPOINT", checkpoint: 3, points: 85 }],
-    });
+    const result = await saveGrades(teacher, { assignmentId: own.id, entries: [{ ...entry, points: 85 }] });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.saved).toBe(1);
-    expect(result.students.map((s) => s.id)).toEqual([ownStudent.id]);
-    expect(result.students[0]!.checkpoints[2]).toEqual({ points: 85, letter: "B" });
+    expect(result).toMatchObject({ saved: 1, cleared: 0 });
+    expect(result.students.map((s) => s.id)).toEqual([student.id]);
+    expect(result.students[0]!.checkpoints[checkpoint - 1]).toEqual({ points: 85, letter: "B" });
 
     const row = await db.grade.findUniqueOrThrow({ where: { studentId_disciplineId_semester_kind_checkpoint: key } });
     expect(row).toMatchObject({ points: 85, passed: null, gradedByTeacherId: teacher.teacherId });
 
     const n = await db.notification.findFirstOrThrow({
-      where: { userId: ownStudent.userId, type: "GRADE", createdAt: { gte: startedAt } },
+      where: { userId: student.userId, type: "GRADE", createdAt: { gte: startedAt } },
       orderBy: { createdAt: "desc" },
     });
     expect(n.link).toBe("/grades");
-    expect(n.title).toMatch(/^Новая оценка: .+, 3-й срез — B \(85\)$/);
+    expect(n.title).toMatch(/^Новая оценка: .+, \d-й срез — B \(85\)$/);
+    expect(n.title).toContain(`${checkpoint}-й срез`);
 
-    const mine = await getMyGrades(studentA);
-    expect(mine.disciplines.find((d) => d.disciplineId === own.disciplineId)!.checkpoints[2]).toEqual({ points: 85, letter: "B" });
+    const mine = await getMyGrades({ userId: student.userId, studentId: student.id } as StudentContext);
+    expect(mine.disciplines.find((d) => d.disciplineId === own.disciplineId)!.checkpoints[checkpoint - 1]).toEqual({ points: 85, letter: "B" });
 
-    // Повтор того же значения — без нового уведомления; пустое значение стирает оценку
-    const again = await saveGrades(teacher, { assignmentId: own.id, entries: [{ studentId: ownStudent.id, kind: "CHECKPOINT", checkpoint: 3, points: 85 }] });
-    expect(again).toMatchObject({ ok: true, saved: 0 });
-    const cleared = await saveGrades(teacher, { assignmentId: own.id, entries: [{ studentId: ownStudent.id, kind: "CHECKPOINT", checkpoint: 3, points: null }] });
-    expect(cleared).toMatchObject({ ok: true, saved: 1 });
+    // Повтор того же значения — без нового уведомления; пустое значение стирает оценку (стёрто ≠ сохранено)
+    const again = await saveGrades(teacher, { assignmentId: own.id, entries: [{ ...entry, points: 85 }] });
+    expect(again).toMatchObject({ ok: true, saved: 0, cleared: 0 });
+    const cleared = await saveGrades(teacher, { assignmentId: own.id, entries: [{ ...entry, points: null }] });
+    expect(cleared).toMatchObject({ ok: true, saved: 0, cleared: 1 });
     expect(await db.grade.findUnique({ where: { studentId_disciplineId_semester_kind_checkpoint: key } })).toBeNull();
-    expect(await db.notification.count({ where: { userId: ownStudent.userId, type: "GRADE", createdAt: { gte: startedAt } } })).toBe(1);
+    expect(await db.notification.count({ where: { userId: student.userId, type: "GRADE", createdAt: { gte: startedAt } } })).toBe(1);
   });
 
   it("студент видит только свои оценки — ровно те, что в базе у него", async () => {
