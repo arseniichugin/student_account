@@ -106,12 +106,21 @@ lib/navigation.ts        меню для каждой роли — ЕДИНСТ�
 lib/auth/                сессии, пароли, ограничение попыток, guards, серверные действия входа
 lib/data/                ЕДИНСТВЕННОЕ место запросов к базе из страниц; всё фильтруется по контексту
 lib/data/schedule.ts     расписание: личное (StudentContext), группы/преподавателя и поиск (UserContext)
+lib/data/schedule-moves.ts  заглушки «Перенесено на …» (те же myGroupIds/checkRange из schedule.ts)
 lib/validation/          схемы Zod
 lib/university-data/     разбор и проверка файлов вуза, импорт в базу (без server-only — нужен скрипту)
 lib/moscow-time.ts       даты «YYYY-MM-DD» и время по Москве
 lib/schedule/            чистые функции экранов расписания: разбор ?date/?view, «через N мин», адреса
+lib/campus-map/          схема campus-map.json (ОДНА для карты и импорта), чтение файла, поиск аудитории
+lib/safe-url.ts          safeExternalUrl — в ссылку попадает только http(s)
+lib/config.ts            UNIVERSITY_NAME (название вуза, env), isDemoMode()
+lib/requests/status.ts   подписи статусов заявок (годится и клиенту)
 components/ui/           базовые компоненты (Button, Input, Card, EmptyState, Skeleton…)
 components/schedule/     LessonCard / LessonList, неделя, навигация по датам, поиск, скелетоны
+components/campus-map/   обёртка карты кампуса для React (грузит public/campus-map/)
+public/campus-map/       карта кампуса без зависимостей (campus-map.js / .css) — уходит в браузер
+tools/                   генераторы данных: schedule-generator/, campus-map/ (не попадают в Docker-образ)
+secrets/                 только на сервере (Docker): credentials.csv от импорта — НЕ коммитить
 data/university/         ЗАМЕНЯЕМЫЕ файлы вуза: students.csv, schedule.csv, campus-map.json (+ README с форматом)
 scripts/                 import-university-data.ts — команда npm run data:import
 prisma/schema.prisma     схема базы; prisma/seed.ts — демо-контент поверх импорта (заявки, оценки, объявления)
@@ -131,6 +140,7 @@ tests/                   автотесты безопасности, импор
 | `npm run data:import` | Проверить и загрузить `data/university/*` (`-- --check` — только проверить, `-- --dir <путь>` — другая папка). Пишет `credentials.csv` — НЕ коммитить |
 | `npm run dev` | Режим разработки, http://localhost:3000 |
 | `npm run db:migrate -- --name <имя>` | Новая миграция после правки `schema.prisma` |
+| `npm run db:reset` | Пересоздать базу с нуля: миграции + импорт + демо-контент |
 | `npm run db:seed` | Пересоздать демо-контент (заявки, оценки, объявления, уведомления, дедлайны) поверх импорта |
 | `npm run lint` · `npm run typecheck` · `npm test` | Проверки — запускать перед каждым коммитом |
 | `npm run build` | Продакшен-сборка |

@@ -33,7 +33,7 @@ export default async function NewRequestPage() {
           </ol>
           <div className="mt-4 space-y-2 border-t border-border pt-4 text-sm text-muted">
             <p className="flex items-center gap-2">
-              <MapPin className="size-4 shrink-0" aria-hidden /> Выдача: корпус Г, ауд. Г-112
+              <MapPin className="size-4 shrink-0" aria-hidden /> Выдача: деканат вашего факультета
             </p>
             <p className="flex items-center gap-2">
               <Clock className="size-4 shrink-0" aria-hidden /> Пн–пт, 10:00–16:00
