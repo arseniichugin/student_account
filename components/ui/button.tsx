@@ -10,7 +10,8 @@ export const buttonVariants = cva(
         primary: "bg-primary text-on-primary hover:bg-primary-hover",
         secondary: "bg-surface-muted text-text hover:bg-border",
         ghost: "text-text hover:bg-surface-muted",
-        danger: "bg-danger-soft text-danger hover:bg-danger hover:text-white",
+        // on-primary на --danger: 5,5:1 в светлой теме и 6,8:1 в тёмной (белый в тёмной — только 2,8:1)
+        danger: "bg-danger-soft text-danger hover:bg-danger hover:text-on-primary",
       },
       size: {
         md: "",
