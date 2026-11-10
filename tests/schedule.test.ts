@@ -178,7 +178,7 @@ describe("Поиск и открытое расписание", () => {
     }
     // Обычный запрос с дефисом работает как раньше
     const academic = scheduleRows.find((r) => /^\d-/.test(r["group"]!))!["group"]!;
-    expect((await searchScheduleTargets(anyUser, academic.slice(0, 4))).some((r) => r.name === academic)).toBe(true);
+    expect((await searchScheduleTargets(anyUser, academic.slice(0, 4))).some((r) => r.type === "group" && r.name === academic)).toBe(true);
   });
 
   it("расписание группы и преподавателя совпадает с CSV", async () => {
