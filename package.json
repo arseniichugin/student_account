@@ -15,7 +15,7 @@
     "data:import": "tsx scripts/import-university-data.ts",
     "db:seed": "prisma db seed",
     "db:setup": "prisma migrate deploy && npm run data:import && prisma db seed",
-    "db:reset": "prisma migrate reset --force"
+    "db:reset": "prisma migrate reset --force && npm run data:import && prisma db seed"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",
