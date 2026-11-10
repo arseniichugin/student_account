@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { gradeNotification } from "@/lib/grades/notification";
 import {
   GRADE_SCALE,
   averagePoints,
@@ -131,5 +132,20 @@ describe("Учебный период", () => {
     expect(currentCheckpoint("2026-11-15")).toBe(2);
     expect(currentCheckpoint("2026-11-16")).toBe(3);
     expect(currentCheckpoint("2026-12-20")).toBeNull();
+  });
+});
+
+describe("Уведомление о новой оценке", () => {
+  it("текст и ссылка на /grades; после краткого ФИО с точкой — одна точка, а не две", () => {
+    const n = gradeNotification({ discipline: "Зельеварение", kind: "CHECKPOINT", checkpoint: 2, points: 88, teacher: "Юдин Ю.С." });
+    expect(n.title).toBe("Новая оценка: Зельеварение, 2-й срез — B (88)");
+    expect(n.body).toBe("Преподаватель: Юдин Ю.С. Все оценки семестра — в разделе «Оценки».");
+    expect(n.link).toBe("/grades");
+  });
+
+  it("зачёт и преподаватель без точки на конце", () => {
+    const n = gradeNotification({ discipline: "Ботаника", kind: "CREDIT", passed: false, teacher: "Семёнов С" });
+    expect(n.title).toBe("Новая оценка: Ботаника, зачёт — не зачтено");
+    expect(n.body.startsWith("Преподаватель: Семёнов С. ")).toBe(true);
   });
 });

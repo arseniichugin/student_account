@@ -17,7 +17,10 @@ export function gradeNotification(g: GradeNotificationInput): { title: string; b
   const value = g.kind === "CREDIT" ? formatCredit(g.passed) : formatScored(scored(g.points));
   return {
     title: `Новая оценка: ${g.discipline}, ${what} — ${value}`,
-    body: [g.teacher ? `Преподаватель: ${g.teacher}.` : null, "Все оценки семестра — в разделе «Оценки»."].filter(Boolean).join(" "),
+    // Краткое ФИО уже кончается точкой («Юдин Ю.С.») — вторую не ставим
+    body: [g.teacher ? `Преподаватель: ${g.teacher.replace(/\.+$/, "")}.` : null, "Все оценки семестра — в разделе «Оценки»."]
+      .filter(Boolean)
+      .join(" "),
     link: GRADES_PATH,
   };
 }
