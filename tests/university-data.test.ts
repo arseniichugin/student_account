@@ -24,6 +24,7 @@ import { translit } from "@/lib/university-data/translit";
 import {
   formatIssue,
   pickTestStudents,
+  pickTestTeachers,
   staffLoginForFaculty,
   validateUniversityData,
   type UniversityFiles,
@@ -243,6 +244,64 @@ describe("Аккаунты", () => {
       expect(p).toHaveLength(12);
       expect(p).not.toMatch(/[0O1lIio]/);
     }
+  });
+});
+
+describe("Преподаватели: аккаунты и назначения", () => {
+  const HEADER = "lessonOid;date;beginLesson;endLesson;discipline;kindOfWork;lecturer;lecturerOid;lecturerEmail;group;auditorium;building;status";
+  const ROWS = [
+    "1;2026.11.09;09:00;10:20;Алгебра;Лекция;Орлов В.П.;10;v.orlov@test.example.org;1-АЛ-1;;;",
+    "2;2026.11.10;09:00;10:20;Алгебра;Семинар;Ким А.А.;11;A.Kim@test.example.org;1-АЛ-1;;;",
+    "3;2026.11.11;09:00;10:20;Алгебра;Семинар;Петров П.П.;12;p.petrov@test.example.org;1-АЛ-1;;;replaced",
+    "4;2026.12.20;09:00;10:20;Алгебра;Экзамен;Орлов В.П.;10;v.orlov@test.example.org;1-АЛ-1;;;",
+    "5;2026.11.12;09:00;10:20;Английский язык;Практическое занятие;Ким А.А.;11;A.Kim@test.example.org;1-АЛ-1 (1);;;",
+    "6;2026.12.25;09:00;10:20;Английский язык;Зачет;Ким А.А.;11;A.Kim@test.example.org;1-АЛ-1 (1);;;",
+    "7;2026.12.10;09:00;10:20;Английский язык;Зачёт;Ким А.А.;11;A.Kim@test.example.org;1-АЛ-1 (1);;;cancelled",
+    "8;2026.11.12;09:00;10:20;Немецкий язык;Практическое занятие;Ким А.А.;11;A.Kim@test.example.org;1-АЛ-1 (2);;;",
+    "9;2026.11.13;09:00;10:20;Геометрия;Семинар;Орлов В.П.;10;v.orlov@test.example.org;2-БТ-1;;;",
+  ];
+  const files = (rows = ROWS): UniversityFiles => ({ ...validFiles(), schedule: [HEADER, ...rows].join("\n") });
+  const replaceEmail = (from: string, to: string) => ROWS.map((r) => r.replaceAll(from, to));
+
+  it("назначения — только семинары и практические занятия без разовых замен; итоговый контроль — из расписания", () => {
+    const r = validateUniversityData(files());
+    if (!r.ok) throw new Error(r.errors.map(formatIssue).join("\n"));
+    const got = r.data.assignments.map((a) => `${a.teacherOid} ${a.discipline} ${a.group} ${a.finalKind} ${a.finalDate}`);
+    expect(got.sort()).toEqual(
+      [
+        "11 Алгебра 1-АЛ-1 EXAM 2026-12-20", // лектор Орлов не ставит оценки, замена Петрова не считается
+        "11 Английский язык 1-АЛ-1 (1) CREDIT 2026-12-25", // «Зачет» через «е»; отменённый зачёт 10.12 не берётся
+        "11 Немецкий язык 1-АЛ-1 (2) null null",
+        "10 Геометрия 2-БТ-1 null null",
+      ].sort(),
+    );
+    expect(r.warnings.map(formatIssue).join("\n")).toMatch(/2 пар «дисциплина — группа» с семинарами без экзамена и зачёта/);
+  });
+
+  it("логин — часть почты до «@» в нижнем регистре; без почты или со странной почтой — без аккаунта", () => {
+    const r = validateUniversityData(files(replaceEmail("p.petrov@test.example.org", "нет почты")));
+    if (!r.ok) throw new Error(r.errors.map(formatIssue).join("\n"));
+    const login = (oid: string) => r.data.teachers.find((t) => t.oid === oid)!.login;
+    expect([login("10"), login("11"), login("12")]).toEqual(["v.orlov", "a.kim", null]);
+    expect(r.warnings.map(formatIssue).join("\n")).toMatch(/из почты не получается логин.*Петров/);
+  });
+
+  it("логин преподавателя совпадает со студентом, деканатом или другим преподавателем — ошибка, а не тихая подмена", () => {
+    const asStudent = errorsOf(files(replaceEmail("A.Kim@test.example.org", "maria.ivanova@other.example.org")));
+    expect(asStudent.join("\n")).toMatch(/schedule\.csv, строка 3: преподаватель «Ким А\.А\.».*совпадает с логином студента \(students\.csv, строка 2\)/);
+    const asStaff = errorsOf(files(replaceEmail("v.orlov@test.example.org", "dekanat.al@test.example.org")));
+    expect(asStaff.join("\n")).toMatch(/зарезервированы для деканатов/);
+    const twice = errorsOf(files(replaceEmail("p.petrov@test.example.org", "a.kim@other.example.org")));
+    expect(twice.join("\n")).toMatch(/логин «a\.kim» из почты уже есть у преподавателя/);
+  });
+
+  it("тестовые преподаватели — семинаристы групп тестовых студентов, разные люди", () => {
+    const r = validateUniversityData(files());
+    if (!r.ok) throw new Error("fixture");
+    const students = pickTestStudents(r.data);
+    expect(students.map((s) => s.login)).toEqual(["maria.ivanova", "yan.sidorov", "oleg.petrov"]);
+    // Мария: 1-АЛ-1 и 1-АЛ-1 (1) — там семинары ведёт только Ким; Ян: 2-БТ-1 — Орлов
+    expect(pickTestTeachers(r.data, students).map((t) => t.login)).toEqual(["a.kim", "v.orlov"]);
   });
 });
 

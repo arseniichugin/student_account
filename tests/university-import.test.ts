@@ -11,15 +11,21 @@ import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { db } from "@/lib/db";
-import { ROLE_STUDENT, credentialsCsv } from "@/lib/university-data/credentials";
+import { ROLE_STUDENT, ROLE_TEACHER, credentialsCsv } from "@/lib/university-data/credentials";
 import { parseCsv } from "@/lib/university-data/csv";
-import { DEFAULT_DEMO_PASSWORD, importUniversityData, testLoginsFromEnv } from "@/lib/university-data/import";
+import {
+  DEFAULT_DEMO_PASSWORD,
+  importUniversityData,
+  testLoginsFromEnv,
+  testTeacherLoginsFromEnv,
+} from "@/lib/university-data/import";
 import { loadUniversityData, universityDataDir } from "@/lib/university-data/load";
 
 const tmp = mkdtempSync(path.join(tmpdir(), "import-again-"));
 // Те же тестовые аккаунты, что выбирает скрипт импорта: иначе при заданной TEST_STUDENT_LOGINS
 // тест «сбросил» бы их на автоматически выбранных студентов.
 const testLogins = testLoginsFromEnv();
+const testTeacherLogins = testTeacherLoginsFromEnv();
 
 afterAll(async () => {
   rmSync(tmp, { recursive: true, force: true });
@@ -27,20 +33,24 @@ afterAll(async () => {
 });
 
 async function snapshot() {
-  const [users, students, requests, grades, deadlines, groups, teachers, rooms, lessons, lessonGroups, memberships] = await Promise.all([
+  const [users, students, requests, grades, deadlines, groups, teachers, rooms, lessons, lessonGroups, memberships, assignments] = await Promise.all([
     db.user.findMany({ select: { id: true, login: true, passwordHash: true, isDemo: true }, orderBy: { login: "asc" } }),
     db.student.findMany({ select: { id: true, externalId: true, academicGroupId: true }, orderBy: { externalId: "asc" } }),
     db.request.findMany({ select: { id: true, studentId: true, status: true }, orderBy: { id: "asc" } }),
     db.grade.count(),
     db.deadline.findMany({ select: { id: true, groupId: true }, orderBy: { id: "asc" } }),
     db.group.findMany({ select: { id: true, name: true, kind: true, parentId: true }, orderBy: { name: "asc" } }),
-    db.teacher.findMany({ select: { id: true, oid: true }, orderBy: { oid: "asc" } }),
+    db.teacher.findMany({ select: { id: true, oid: true, userId: true }, orderBy: { oid: "asc" } }),
     db.room.count(),
     db.lesson.count(),
     db.lessonGroup.count(),
     db.studentGroup.count(),
+    db.teachingAssignment.findMany({
+      select: { id: true, teacherId: true, disciplineId: true, groupId: true, finalKind: true, finalDate: true },
+      orderBy: { id: "asc" },
+    }),
   ]);
-  return { users, students, requests, grades, deadlines, groups, teachers, rooms, lessons, lessonGroups, memberships };
+  return { users, students, requests, grades, deadlines, groups, teachers, rooms, lessons, lessonGroups, memberships, assignments };
 }
 
 describe("Повторный импорт", () => {
@@ -55,9 +65,11 @@ describe("Повторный импорт", () => {
     const summary = await importUniversityData(db, result.data, {
       demoPassword: process.env.DEMO_PASSWORD || DEFAULT_DEMO_PASSWORD,
       testLogins,
+      testTeacherLogins,
       credentialsPath,
     });
     expect(summary.createdAccounts).toBe(0);
+    expect(summary.createdTeacherAccounts).toBe(0);
     expect(summary.removedStudents).toBe(0);
 
     const after = await snapshot();
@@ -69,10 +81,11 @@ describe("Повторный импорт", () => {
     expect(strip(after)).toEqual(strip(before));
     expect(after.lessons).toBe(result.data.lessons.length);
     expect(after.lessonGroups).toBe(result.data.scheduleRows);
+    expect(after.assignments.length).toBe(result.data.assignments.length);
 
     // Тестовым аккаунтам и деканатам импорт ставит DEMO_PASSWORD
     const demo = after.users.filter((u) => u.isDemo);
-    expect(demo.length).toBe((testLogins?.length ?? 3) + result.data.faculties.length);
+    expect(demo.length).toBe((testLogins?.length ?? 3) + (testTeacherLogins?.length ?? 2) + result.data.faculties.length);
     for (const u of demo) expect(await verifyPassword(u.passwordHash, process.env.DEMO_PASSWORD || DEFAULT_DEMO_PASSWORD)).toBe(true);
 
     // Новых аккаунтов нет — в файле только тестовые студенты и деканаты, UTF-8 с BOM и «;»
@@ -89,6 +102,7 @@ describe("Повторный импорт", () => {
     const options = {
       demoPassword: process.env.DEMO_PASSWORD || DEFAULT_DEMO_PASSWORD,
       testLogins,
+      testTeacherLogins,
       credentialsPath: path.join(tmp, "swap.csv"),
     };
     // Два обычных (не тестовых) студента меняются почтой и зачёткой
@@ -137,6 +151,8 @@ describe("Повторный импорт", () => {
     const recovered = regular[22]!; // его пароль есть только в credentials.csv.tmp прошлого импорта
     const userBy = (login: string) => db.user.findUniqueOrThrow({ where: { login }, select: { id: true, passwordHash: true, isDemo: true } });
     const [droppedUser, substituteUser, renamedUser, recoveredUser] = await Promise.all([dropped!, substitute.login, renamed.login, recovered.login].map(userBy));
+    // Тестовые преподаватели закреплены: смена тестовых студентов не должна менять и их
+    const demoTeachers = (await db.user.findMany({ where: { isDemo: true, role: "TEACHER" }, select: { login: true } })).map((u) => u.login);
 
     // Сессии, которые должны закрыться
     const session = (userId: string) => db.session.create({ data: { userId, tokenHash: randomUUID(), expiresAt: new Date(Date.now() + 3600_000) } });
@@ -154,7 +170,12 @@ describe("Повторный импорт", () => {
         ...result.data,
         students: result.data.students.map((s) => (s === renamed ? { ...s, lastName: `${s.lastName}-Новая` } : s)),
       };
-      const summary = await importUniversityData(db, changed, { demoPassword, credentialsPath, testLogins: [...keptTest, substitute.login] });
+      const summary = await importUniversityData(db, changed, {
+        demoPassword,
+        credentialsPath,
+        testLogins: [...keptTest, substitute.login],
+        testTeacherLogins: demoTeachers,
+      });
 
       // Бывший тестовый: без пометки, демо-пароль не подходит, новый пароль — в файле и подходит к базе
       const after = await userBy(dropped!);
@@ -178,11 +199,62 @@ describe("Повторный импорт", () => {
       expect(creds.has(renamed.login)).toBe(false);
       expect(summary.warnings.some((w) => w.includes("перенесено в основной файл строк 1, отброшено недействительных 1"))).toBe(true);
     } finally {
-      await importUniversityData(db, result.data, { demoPassword, testLogins, credentialsPath });
+      await importUniversityData(db, result.data, { demoPassword, testLogins, testTeacherLogins, credentialsPath });
       // Пароли обычных студентов, которых тест трогал, — как были
       for (const u of [substituteUser!, recoveredUser!]) await db.user.update({ where: { id: u.id }, data: { passwordHash: u.passwordHash } });
     }
     expect((await userBy(dropped!)).isDemo).toBe(true);
     expect((await userBy(substitute.login)).isDemo).toBe(false);
   }, 180_000);
+
+  it("преподаватели: аккаунт по почте, назначения по семинарам; смена почты — новый логин, тот же пароль", async () => {
+    const result = loadUniversityData(universityDataDir());
+    if (!result.ok) throw new Error("основной набор данных не проходит проверку");
+    const demoPassword = process.env.DEMO_PASSWORD || DEFAULT_DEMO_PASSWORD;
+    const credentialsPath = path.join(tmp, "teachers.csv");
+
+    // У каждого преподавателя с почтой — аккаунт TEACHER с логином из почты
+    const teachers = await db.teacher.findMany({ select: { email: true, user: { select: { login: true, role: true } } } });
+    const withEmail = teachers.filter((t) => t.email);
+    expect(withEmail.length).toBeGreaterThan(0);
+    for (const t of withEmail) expect(t.user).toEqual({ login: t.email!.split("@")[0]!.toLowerCase(), role: "TEACHER" });
+
+    // Назначение есть только там, где преподаватель ведёт у группы семинар или практическое занятие (не замену)
+    const rows = await db.$queryRaw<{ bad: bigint }[]>`
+      SELECT count(*) AS bad FROM "TeachingAssignment" a
+      WHERE NOT EXISTS (
+        SELECT 1 FROM "Lesson" l JOIN "LessonGroup" lg ON lg."lessonId" = l.id
+        WHERE l."teacherId" = a."teacherId" AND l."disciplineId" = a."disciplineId" AND lg."groupId" = a."groupId"
+          AND l.kind IN ('Семинар', 'Практическое занятие') AND l.status <> 'REPLACED'
+      )`;
+    expect(Number(rows[0]!.bad)).toBe(0);
+    expect(await db.teachingAssignment.count()).toBe(result.data.assignments.length);
+
+    // Двое тестовых преподавателей: пароль — DEMO_PASSWORD
+    const demoTeachers = await db.user.findMany({ where: { role: "TEACHER", isDemo: true }, select: { login: true, passwordHash: true } });
+    expect(demoTeachers).toHaveLength(testTeacherLogins?.length ?? 2);
+    for (const u of demoTeachers) expect(await verifyPassword(u.passwordHash, demoPassword)).toBe(true);
+
+    // Обычный преподаватель сменил почту: логин новый, аккаунт и пароль прежние, строка в credentials.csv переехала
+    const demoLogins = new Set(demoTeachers.map((u) => u.login));
+    const regular = result.data.teachers.find((t) => t.login && !demoLogins.has(t.login))!;
+    const login = regular.login!;
+    const before = await db.user.findUniqueOrThrow({ where: { login }, select: { id: true, passwordHash: true } });
+    writeFileSync(credentialsPath, credentialsCsv([{ login, fullName: regular.fullName, email: regular.email!, role: ROLE_TEACHER, password: "Known-Pass-1" }]));
+    const changed = {
+      ...result.data,
+      teachers: result.data.teachers.map((t) => (t === regular ? { ...t, email: `${login}.new@test.example.org`, login: `${login}.new` } : t)),
+    };
+    try {
+      await importUniversityData(db, changed, { demoPassword, testLogins, testTeacherLogins, credentialsPath });
+      const after = await db.user.findUniqueOrThrow({ where: { id: before.id }, select: { login: true, passwordHash: true } });
+      expect(after).toEqual({ login: `${login}.new`, passwordHash: before.passwordHash });
+      const creds = new Map(parseCsv(readFileSync(credentialsPath, "utf8")).records.map((r) => [r.values[0], r.values]));
+      expect(creds.get(`${login}.new`)?.[4]).toBe("Known-Pass-1");
+      expect(creds.has(login)).toBe(false);
+    } finally {
+      await importUniversityData(db, result.data, { demoPassword, testLogins, testTeacherLogins, credentialsPath });
+    }
+    expect(await db.user.findUniqueOrThrow({ where: { id: before.id }, select: { login: true } })).toEqual({ login });
+  }, 240_000);
 });
