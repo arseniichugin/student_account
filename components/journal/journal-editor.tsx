@@ -360,7 +360,7 @@ export function JournalEditor({ journal }: { journal: Journal }) {
   const inputClass = (st: ReturnType<typeof cellState>, big = false) =>
     cn(
       "rounded-lg border bg-surface text-center tabular-nums text-text outline-none transition-colors placeholder:text-muted focus:ring-2",
-      big ? "h-12 w-24 text-[20px] font-semibold" : "h-11 w-14 text-[16px]",
+      big ? "h-12 w-24 text-[20px] font-semibold" : "h-11 w-12 text-[16px] xl:w-14",
       st.error
         ? "border-danger bg-danger-soft focus:ring-danger/30"
         : st.dirty
@@ -397,7 +397,7 @@ export function JournalEditor({ journal }: { journal: Journal }) {
             type="text"
             inputMode="numeric"
             pattern="[0-9]*"
-            maxLength={3}
+            maxLength={6}
             autoComplete="off"
             enterKeyHint={index === students.length - 1 ? "done" : "next"}
             value={st.text}
@@ -433,7 +433,7 @@ export function JournalEditor({ journal }: { journal: Journal }) {
           aria-describedby={describedBy(st, id, false)}
           onChange={(e) => setCell(s, "final", e.target.value)}
           onKeyDown={onFieldKeyDown("d", index, "final")}
-          className={cn(inputClass(st), "w-36 px-2 text-left text-[14px]", st.text === "fail" && !st.dirty && "text-danger")}
+          className={cn(inputClass(st), "w-34 px-2 text-left text-[13px] xl:w-36 xl:text-[14px]", st.text === "fail" && !st.dirty && "text-danger")}
         >
           <option value="">не выставлено</option>
           <option value="pass">зачтено</option>
@@ -620,6 +620,8 @@ export function JournalEditor({ journal }: { journal: Journal }) {
           {mode !== "final" && ` · ${dueLabel(CHECKPOINTS[mode - 1]!.due)}`}
           {mode === "final" && journal.assignment.final?.date && ` · ${formatDayMonthLong(journal.assignment.final.date)}`}
         </p>
+        {/* Порядок заголовков h1 → h2 → h3 (ФИО студента — h3) */}
+        <h2 className="sr-only">Студенты</h2>
         <ol className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {students.map((s, i) => {
             const avg = liveAverage(s);
@@ -664,7 +666,7 @@ export function JournalEditor({ journal }: { journal: Journal }) {
           </caption>
           <thead>
             <tr className="text-[13px] text-muted">
-              <th scope="col" className="sticky top-0 left-0 z-30 border-b border-border bg-surface px-3 py-2.5 font-medium">
+              <th scope="col" className="sticky top-0 left-0 z-30 border-b border-border bg-surface px-2 py-2.5 font-medium xl:px-3">
                 Студент
               </th>
               {CP_COLS.map((c) => (
@@ -672,7 +674,7 @@ export function JournalEditor({ journal }: { journal: Journal }) {
                   key={c}
                   scope="col"
                   className={cn(
-                    "sticky top-0 z-20 border-b border-border px-1.5 py-2.5 font-medium xl:px-2 whitespace-nowrap",
+                    "sticky top-0 z-20 border-b border-border px-1.5 py-2.5 font-medium xl:px-2 xl:whitespace-nowrap",
                     c === current ? "bg-primary-soft text-primary" : "bg-surface",
                   )}
                 >
@@ -689,7 +691,7 @@ export function JournalEditor({ journal }: { journal: Journal }) {
               <th
                 scope="col"
                 className={cn(
-                  "sticky top-0 z-20 border-b border-border px-1.5 py-2.5 font-medium xl:px-2 whitespace-nowrap",
+                  "sticky top-0 z-20 border-b border-border px-1.5 py-2.5 font-medium xl:px-2 xl:whitespace-nowrap",
                   current === null ? "bg-primary-soft text-primary" : "bg-surface",
                 )}
               >
@@ -707,9 +709,9 @@ export function JournalEditor({ journal }: { journal: Journal }) {
                 <tr key={s.id} className="group align-top">
                   <th
                     scope="row"
-                    className="sticky left-0 z-10 border-b border-border bg-surface px-3 py-2 text-left font-normal group-last:border-0 group-hover:bg-surface-muted"
+                    className="sticky left-0 z-10 border-b border-border bg-surface px-2 py-2 text-left font-normal group-last:border-0 group-hover:bg-surface-muted xl:px-3"
                   >
-                    <span className="block min-w-40 font-medium break-words text-text">
+                    <span className="block min-w-32 font-medium xl:min-w-40 break-words text-text">
                       <span className="mr-1.5 text-muted tabular-nums">{i + 1}.</span>
                       {s.fullName}
                     </span>
