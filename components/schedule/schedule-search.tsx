@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { GraduationCap, Loader2, Search, Users, X } from "lucide-react";
-import { RetryButton } from "@/components/campus-map/retry-button";
+import { RetryButton } from "@/components/ui/retry-button";
 import type { ScheduleView } from "@/lib/schedule/dates";
 import { scheduleHref } from "@/lib/schedule/links";
 import { cn } from "@/lib/utils";

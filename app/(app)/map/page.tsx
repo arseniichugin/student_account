@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { MapPinOff } from "lucide-react";
 import { BackToScheduleButton } from "@/components/campus-map/back-button";
 import { CampusMapView } from "@/components/campus-map/campus-map-view";
-import { RetryButton } from "@/components/campus-map/retry-button";
+import { RetryButton } from "@/components/ui/retry-button";
 import { Card } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/guards";
 import { loadCampusMap } from "@/lib/campus-map/load";

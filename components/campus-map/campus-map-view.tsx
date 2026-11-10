@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MapPinOff } from "lucide-react";
-import { RetryButton } from "@/components/campus-map/retry-button";
+import { RetryButton } from "@/components/ui/retry-button";
 import { Card } from "@/components/ui/card";
 import { findRoom } from "@/lib/campus-map/rooms";
 import type { CampusMapData, CampusRoom } from "@/lib/campus-map/schema";
