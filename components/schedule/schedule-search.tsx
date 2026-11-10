@@ -184,7 +184,7 @@ export function ScheduleSearch({
             autoComplete="off"
             enterKeyHint="search"
             maxLength={SCHEDULE_SEARCH_MAX_LENGTH}
-            placeholder="2-СЛ-1 или Комаров"
+            placeholder="Группа или фамилия преподавателя"
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -270,8 +270,8 @@ export function ScheduleSearch({
         )}
         {open && state.status === "done" && results.length === 0 && (
           <p className="text-sm text-muted">
-            Ничего не найдено{faculty ? " на выбранном факультете" : ""}. Проверьте написание: группа — «2-СЛ-1», преподаватель —
-            по фамилии.
+            Ничего не найдено{faculty ? " на выбранном факультете" : ""}. Проверьте написание: группа — как в расписании,
+            преподаватель — по фамилии.
           </p>
         )}
         {results.length > 0 && (

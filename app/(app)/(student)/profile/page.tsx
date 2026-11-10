@@ -3,6 +3,7 @@ import { ChangePasswordForm } from "@/components/change-password-form";
 import { Card, CardTitle } from "@/components/ui/card";
 import { DetailsList } from "@/components/ui/details-list";
 import { requireStudent } from "@/lib/auth/guards";
+import { UNIVERSITY_NAME } from "@/lib/config";
 import { PASSWORD_CHANGE_LOCK_MESSAGE, getPasswordChangeLock } from "@/lib/data/account";
 import { getMyStudentProfile } from "@/lib/data/profile";
 
@@ -29,7 +30,7 @@ export default async function ProfilePage() {
             </div>
             <div>
               <p className="text-[17px] font-semibold">{fullName}</p>
-              <p className="text-sm text-muted">Студент · Хогвартс</p>
+              <p className="text-sm text-muted">Студент · {UNIVERSITY_NAME}</p>
             </div>
           </div>
           <DetailsList

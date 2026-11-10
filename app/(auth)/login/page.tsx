@@ -4,6 +4,7 @@ import { Bell, CalendarDays, FileCheck2, GraduationCap } from "lucide-react";
 import { ConceptBadge } from "@/components/concept-badge";
 import { Logo } from "@/components/logo";
 import { getCurrentSession } from "@/lib/auth/session";
+import { UNIVERSITY_NAME } from "@/lib/config";
 import { LoginForm } from "./login-form";
 
 export const metadata: Metadata = { title: "Вход" };
@@ -25,10 +26,10 @@ export default async function LoginPage() {
     <div className="min-h-dvh lg:grid lg:grid-cols-2">
       {/* Левая половина — о сервисе (только на компьютере) */}
       <section className="relative hidden overflow-hidden bg-primary p-12 text-on-primary lg:flex lg:flex-col">
-        <HorizonArt />
+        <DecorArt />
         <div className="relative flex items-center gap-2">
           <Logo withText={false} inverse />
-          <span className="text-lg font-semibold">Хогвартс · цифровой деканат</span>
+          <span className="text-lg font-semibold">{UNIVERSITY_NAME} · цифровой деканат</span>
         </div>
         <div className="relative my-auto max-w-md py-12">
           <p className="text-4xl leading-tight font-bold">Вся учёба — в одном месте</p>
@@ -73,7 +74,7 @@ export default async function LoginPage() {
 }
 
 /** Декоративная «линия горизонта» с восходящим солнцем — в духе логотипа. */
-function HorizonArt() {
+function DecorArt() {
   return (
     <svg
       className="pointer-events-none absolute -right-40 -bottom-32 h-[420px] w-[620px] opacity-[0.08]"

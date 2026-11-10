@@ -56,6 +56,8 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       # Публичный стенд: демо-аккаунты общие, смена пароля отключена.
       DEMO_MODE: ${DEMO_MODE:-1}
+      # Название вуза в интерфейсе (по умолчанию «Хогвартс»), см. data/university/README.md.
+      UNIVERSITY_NAME: ${UNIVERSITY_NAME:-}
       # Приложение доступно только через прокси (Caddy/nginx) на этом же сервере,
       # который выставляет X-Real-IP, поэтому этому заголовку можно верить.
       TRUST_PROXY: ${TRUST_PROXY:-1}

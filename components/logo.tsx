@@ -1,9 +1,11 @@
+import { UNIVERSITY_NAME } from "@/lib/config";
 import { cn } from "@/lib/utils";
 
 /**
  * Временный знак: линия горизонта и восходящее солнце.
  * Собственный рисунок, не связан с логотипами реальных вузов.
  * Финальный логотип — на этапе 1 (docs/DESIGN.md).
+ * Серверный компонент: название вуза — из UNIVERSITY_NAME (lib/config.ts).
  */
 export function Logo({
   className,
@@ -26,7 +28,7 @@ export function Logo({
       </svg>
       {withText && (
         <span className="leading-tight">
-          <span className="block text-[15px] font-semibold text-text">Хогвартс</span>
+          <span className="block text-[15px] font-semibold text-text">{UNIVERSITY_NAME}</span>
           <span className="block text-[11px] text-muted">цифровой деканат</span>
         </span>
       )}

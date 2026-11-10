@@ -1,16 +1,21 @@
 import type { Metadata, Viewport } from "next";
 import "@fontsource-variable/inter";
+import { UNIVERSITY_NAME } from "@/lib/config";
 import "./globals.css";
 
-export const metadata: Metadata = {
-  title: {
-    default: "Хогвартс · цифровой деканат",
-    template: "%s · Хогвартс",
-  },
-  description:
-    "Концепт личного кабинета студента вымышленного университета «Хогвартс» для конкурса. Не является официальным сервисом. Все данные вымышлены.",
-  robots: { index: false, follow: false },
-};
+// Функция, а не константа: название вуза (env UNIVERSITY_NAME) берётся при запросе, а не при сборке.
+export function generateMetadata(): Metadata {
+  return {
+    title: {
+      default: `${UNIVERSITY_NAME} · цифровой деканат`,
+      template: `%s · ${UNIVERSITY_NAME}`,
+    },
+    description:
+      `Концепт личного кабинета студента вымышленного университета «${UNIVERSITY_NAME}» для конкурса. ` +
+      "Не является официальным сервисом. Все данные вымышлены.",
+    robots: { index: false, follow: false },
+  };
+}
 
 export const viewport: Viewport = {
   width: "device-width",

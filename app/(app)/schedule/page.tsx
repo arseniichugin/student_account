@@ -9,6 +9,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/states";
 import { requireStudent, requireUser, type UserContext } from "@/lib/auth/guards";
+import { UNIVERSITY_NAME } from "@/lib/config";
 import { getMyStudentProfile } from "@/lib/data/profile";
 import {
   ScheduleRangeError,
@@ -84,7 +85,7 @@ export default async function SchedulePage({ searchParams }: PageProps<"/schedul
     <div className="min-w-0 space-y-5">
       <div>
         <h1 className="text-[28px] leading-tight font-bold lg:text-[32px]">Расписание</h1>
-        <p className="mt-1 text-muted">Любая группа или преподаватель Хогвартса.</p>
+        <p className="mt-1 text-muted">Все группы и преподаватели · {UNIVERSITY_NAME}</p>
       </div>
 
       <Card>

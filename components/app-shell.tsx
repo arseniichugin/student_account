@@ -5,6 +5,7 @@ import { Logo } from "@/components/logo";
 import { NavLinks } from "@/components/nav-links";
 import type { NavItem } from "@/lib/navigation";
 import { logoutAction } from "@/lib/auth/actions";
+import { UNIVERSITY_NAME } from "@/lib/config";
 import { cn } from "@/lib/utils";
 
 export type ShellUser = { name: string; meta: string; initials: string };
@@ -31,7 +32,7 @@ export function AppShell({
       {/* Боковое меню — только на компьютере. Фон на всю высоту колонки, меню «прилипает» к экрану. */}
       <div className="hidden border-r border-border bg-surface lg:block">
         <aside className="sticky top-0 flex h-dvh flex-col px-4 py-5">
-          <Link href={homeHref} aria-label="Хогвартс — на главную" className="inline-flex min-h-11 items-center px-2">
+          <Link href={homeHref} aria-label={`${UNIVERSITY_NAME} — на главную`} className="inline-flex min-h-11 items-center px-2">
             <Logo />
           </Link>
           <ConceptBadge className="mx-2 mt-3 self-start" />
@@ -58,7 +59,7 @@ export function AppShell({
         {/* Шапка — телефон и планшет */}
         <header data-shell-overlay="top" className="sticky top-0 z-20 border-b border-border bg-bg/90 backdrop-blur lg:hidden">
           <div className="mx-auto flex h-14 max-w-3xl items-center gap-3 px-4">
-            <Link href={homeHref} aria-label="Хогвартс — на главную" className="inline-flex min-h-11 items-center">
+            <Link href={homeHref} aria-label={`${UNIVERSITY_NAME} — на главную`} className="inline-flex min-h-11 items-center">
               <Logo />
             </Link>
             <ConceptBadge className="hidden sm:inline-flex" />
