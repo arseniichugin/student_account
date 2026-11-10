@@ -229,12 +229,16 @@ async function main() {
       if (seen.has(key)) continue; // студент в двух группах с одной дисциплиной — оценки одни
       seen.add(key);
       const rand = rng(`grades:${s.externalId}:${pairName}`);
-      // «Сильный» или «слабый» студент — от 64 до 95 в среднем; изредка FX у обычных студентов
+      // «Сильный» или «слабый» студент — от 64 до 95 в среднем; изредка FX у обычных студентов (не у тестовых).
+      // Разброс ±10 вокруг уровня студента. То, что выходит за шкалу, не «прижимаем» к границе (иначе
+      // всплеск ровно 60 и ровно 100 баллов), а разбрасываем внутрь: ниже 60 → 60–75, выше 100 → 86–100.
       const base = 64 + (hash(`ability:${s.externalId}`) % 32);
       const points = () => {
         if (!s.user.isDemo && rand() < 0.03) return 35 + Math.floor(rand() * 25);
         const p = base + Math.round((rand() - 0.5) * 20);
-        return Math.max(60, Math.min(100, p));
+        if (p < 60) return 60 + Math.floor(rand() * 16);
+        if (p > 100) return 86 + Math.floor(rand() * 15);
+        return p;
       };
       const semester = semesterForCourse(s.course);
       const first = s.id === t2?.id && pair === debtPair ? debtPoints : points();
