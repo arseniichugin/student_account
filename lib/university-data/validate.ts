@@ -304,45 +304,53 @@ const STATUS_MAP: Record<string, LessonStatusValue> = {
   replaced: "REPLACED",
 };
 
+// Ограничения длины: строки показываются в кабинете и хранятся в базе — гигантские значения
+// из заменяемого файла не должны раздувать страницы и базу.
+const MAX_TEXT = 300;
+const MAX_URL = 2048;
+const tooLong = `длиннее ${MAX_TEXT} символов`;
+const text = () => required().max(MAX_TEXT, tooLong);
+const optionalText = () => optional().max(MAX_TEXT, tooLong);
+
 const scheduleRowSchema = z
   .object({
-    lessonOid: required(),
-    date: required().refine((v) => toIsoDate(v) !== null, {
+    lessonOid: text(),
+    date: text().refine((v) => toIsoDate(v) !== null, {
       error: (iss) => `${shown(iss.input)} не дата в формате ГГГГ.ММ.ДД (например, 2026.09.01)`,
     }),
-    beginLesson: required().refine((v) => toTime(v) !== null, {
+    beginLesson: text().refine((v) => toTime(v) !== null, {
       error: (iss) => `${shown(iss.input)} не время в формате ЧЧ:ММ (например, 09:00)`,
     }),
-    endLesson: required().refine((v) => toTime(v) !== null, {
+    endLesson: text().refine((v) => toTime(v) !== null, {
       error: (iss) => `${shown(iss.input)} не время в формате ЧЧ:ММ (например, 10:20)`,
     }),
-    lessonNumberStart: optional().refine((v) => v === "" || /^\d{1,2}$/.test(v), {
+    lessonNumberStart: optionalText().refine((v) => v === "" || /^\d{1,2}$/.test(v), {
       error: (iss) => `${shown(iss.input)} не номер пары (нужно целое число)`,
     }),
-    lessonNumberEnd: optional().refine((v) => v === "" || /^\d{1,2}$/.test(v), {
+    lessonNumberEnd: optionalText().refine((v) => v === "" || /^\d{1,2}$/.test(v), {
       error: (iss) => `${shown(iss.input)} не номер пары (нужно целое число)`,
     }),
-    discipline: required(),
-    disciplineOid: optional(),
-    kindOfWork: required(),
-    lecturer: optional(),
-    lecturer_title: optional(),
-    lecturerOid: optional(),
-    lecturerEmail: optional(),
-    lecturer_rank: optional(),
-    group: required(),
-    groupOid: optional(),
-    stream: optional(),
-    subGroup: optional(),
-    auditorium: optional(),
-    building: optional(),
-    note: optional(),
-    url1: optional().refine((v) => v === "" || /^https?:\/\/\S+$/i.test(v), {
+    discipline: text(),
+    disciplineOid: optionalText(),
+    kindOfWork: text(),
+    lecturer: optionalText(),
+    lecturer_title: optionalText(),
+    lecturerOid: optionalText(),
+    lecturerEmail: optionalText(),
+    lecturer_rank: optionalText(),
+    group: text(),
+    groupOid: optionalText(),
+    stream: optionalText(),
+    subGroup: optionalText(),
+    auditorium: optionalText(),
+    building: optionalText(),
+    note: optionalText(),
+    url1: optional().max(MAX_URL, `ссылка длиннее ${MAX_URL} символов`).refine((v) => v === "" || /^https?:\/\/\S+$/i.test(v), {
       // Ссылка показывается студенту как кнопка — допускаем только http(s), никаких javascript:.
       error: (iss) => `ссылка ${shown(iss.input)} должна начинаться с https:// или http://`,
     }),
-    url1_description: optional(),
-    status: optional().refine((v) => v.toLowerCase() in STATUS_MAP, {
+    url1_description: optionalText(),
+    status: optionalText().refine((v) => v.toLowerCase() in STATUS_MAP, {
       error: (iss) => `неизвестный статус ${shown(iss.input)}; допустимо: normal, moved, cancelled, replaced или пусто`,
     }),
   })
@@ -444,11 +452,19 @@ const STUDENT_COLUMNS: ColumnSpec[] = [
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const LOGIN_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
+// ФИО: буквы любых алфавитов (с диакритикой), пробел, дефис, апостроф, точка; начинается с буквы.
+// Ничего похожего на формулы (=, +, @) и разметку — ФИО попадает в credentials.csv и на страницы.
+const NAME_RE = /^[\p{L}\p{M}](?:[\p{L}\p{M}' .’-]*[\p{L}\p{M}.])?$/u;
+const personName = (s: z.ZodString) =>
+  s.max(100, "слишком длинное значение").refine((v) => v === "" || NAME_RE.test(v), {
+    error: (iss) => `${shown(iss.input)} — допустимы только буквы, пробел, дефис, апостроф и точка`,
+  });
+
 const studentRowSchema = z.object({
   externalId: required().max(64, "слишком длинное значение (больше 64 символов)"),
-  lastName: required().max(100, "слишком длинное значение"),
-  firstName: required().max(100, "слишком длинное значение"),
-  middleName: optional().max(100, "слишком длинное значение"),
+  lastName: personName(required()),
+  firstName: personName(required()),
+  middleName: personName(optional()),
   email: required()
     .refine((v) => EMAIL_RE.test(v), { error: (iss) => `${shown(iss.input)} не адрес электронной почты` })
     .refine((v) => LOGIN_RE.test(v.split("@")[0]!.toLowerCase()), {

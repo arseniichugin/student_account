@@ -6,13 +6,20 @@
  * он сравнивает её до и после запуска.
  */
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
-import { parseCsv } from "@/lib/university-data/csv";
-import { generatePassword } from "@/lib/university-data/credentials";
+import { parseCsv, toCsv } from "@/lib/university-data/csv";
+import {
+  ROLE_STUDENT,
+  credentialsCsv,
+  generatePassword,
+  readCredentials,
+  recoverCredentialsTemp,
+} from "@/lib/university-data/credentials";
+import { loadUniversityData } from "@/lib/university-data/load";
 import { translit } from "@/lib/university-data/translit";
 import {
   formatIssue,
@@ -133,6 +140,73 @@ describe("Проверка файлов вуза", () => {
   it("нет карты — только предупреждение", () => {
     const r = validateUniversityData({ ...validFiles(), map: null });
     expect(r.ok).toBe(true);
+  });
+
+  it("ФИО: буквы любых алфавитов, дефис, апостроф, точка — можно; формула — понятная ошибка", () => {
+    const ok = read("valid/students.csv").replace(";Иванова;Мария;Петровна;", ";Д'Артаньян-Мюллер;Мария-Луиза;О’Нил Jr.;");
+    expect(validateUniversityData({ ...validFiles(), students: ok }).ok).toBe(true);
+
+    const students = read("valid/students.csv").replace(";Иванова;Мария;", ";=HYPERLINK(1);Мария;").replace(";Олег;", ";<b>Олег</b>;");
+    const errors = errorsOf({ ...validFiles(), students });
+    expect(errors).toContain("students.csv, строка 2: колонка «Фамилия» — «=HYPERLINK(1)» — допустимы только буквы, пробел, дефис, апостроф и точка");
+    expect(errors.some((e) => e.startsWith("students.csv, строка 3: колонка «Имя» — «<b>Олег</b>»"))).toBe(true);
+  });
+
+  it("schedule.csv: тексты не длиннее 300 символов, ссылка — не длиннее 2048", () => {
+    const schedule = read("valid/schedule.csv")
+      .replace(";Алгебра;", `;${"А".repeat(301)};`)
+      .replace("https://test.example.org/meet/2", `https://test.example.org/${"x".repeat(2048)}`);
+    const errors = errorsOf({ ...validFiles(), schedule });
+    expect(errors).toContain("schedule.csv, строка 2: колонка «discipline» — длиннее 300 символов");
+    expect(errors).toContain("schedule.csv, строка 3: колонка «url1» — ссылка длиннее 2048 символов");
+  });
+
+  it("слишком большой файл не читается — понятная ошибка", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "big-file-"));
+    try {
+      for (const f of ["students.csv", "schedule.csv", "campus-map.json"]) copyFileSync(path.join(FIXTURES, "valid", f), path.join(dir, f));
+      expect(loadUniversityData(dir).ok).toBe(true);
+      const r = loadUniversityData(dir, 1024);
+      if (r.ok) throw new Error("ожидалась ошибка размера");
+      expect(r.errors.map(formatIssue).some((e) => /^schedule\.csv: файл слишком большой: .* МБ, допустимо не больше/.test(e))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("credentials.csv", () => {
+  it("значения, похожие на формулы, предваряются апострофом (CSV-инъекция)", () => {
+    const csv = toCsv(["a", "b", "c", "d", "e", "f", "g"], [["=1+1", "+7", "-2", "@SUM(A1)", "\tx", "Иванов", "=a;b"]]);
+    const values = parseCsv(csv).records[0]!.values;
+    expect(values).toEqual(["'=1+1", "'+7", "'-2", "'@SUM(A1)", "'\tx", "Иванов", "'=a;b"]);
+  });
+
+  it("после сбоя прошлого импорта .tmp объединяется с основным файлом: берутся только действующие пароли", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "creds-recover-"));
+    const file = path.join(dir, "credentials.csv");
+    const row = (login: string, password: string) => ({ login, fullName: "Тест", email: "", role: ROLE_STUDENT, password });
+    try {
+      expect(await recoverCredentialsTemp(file, async () => true)).toBeNull(); // .tmp нет — ничего не делаем
+
+      writeFileSync(file, credentialsCsv([row("a", "old-a"), row("keep", "keep-1")]));
+      writeFileSync(`${file}.tmp`, credentialsCsv([row("a", "new-a"), row("b", "new-b"), row("c", "rolled-back"), row("keep", "keep-1")]));
+      const valid = new Map([["a", "new-a"], ["b", "new-b"]]);
+      const r = await recoverCredentialsTemp(file, async (login, password) => valid.get(login) === password);
+      expect(r).toEqual({ recovered: 2, skipped: 1 });
+      expect(existsSync(`${file}.tmp`)).toBe(false);
+      const rows = readCredentials(file);
+      expect([...rows.values()].map((x) => [x.login, x.password]).sort()).toEqual([["a", "new-a"], ["b", "new-b"], ["keep", "keep-1"]]);
+
+      // Повреждённый .tmp не теряется и не ломает основной файл
+      writeFileSync(`${file}.tmp`, 'Логин;ФИО;Email;Роль;Пароль\r\nx;"не закрыта;;Студент;p');
+      const broken = await recoverCredentialsTemp(file, async () => true);
+      expect(broken?.brokenFile).toMatch(/credentials\.csv\.tmp\.broken-\d+$/);
+      expect(existsSync(broken!.brokenFile!)).toBe(true);
+      expect(readCredentials(file).size).toBe(3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
