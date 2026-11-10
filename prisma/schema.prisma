@@ -18,6 +18,8 @@ datasource db {
 enum Role {
   STUDENT
   STAFF
+  /// Преподаватель из schedule.csv (аккаунт создаёт импорт, логин — часть почты до «@»)
+  TEACHER
 }
 
 model User {
@@ -32,6 +34,7 @@ model User {
 
   student       Student?
   staff         Staff?
+  teacher       Teacher?
   sessions      Session[]
   notifications Notification[]
   announcements Announcement[]
@@ -100,19 +103,19 @@ enum GroupKind {
 
 /// Группа — как в колонке `group` расписания. Группы из расписания без студентов тоже хранятся.
 model Group {
-  id            String         @id @default(cuid())
-  name          String         @unique
+  id            String               @id @default(cuid())
+  name          String               @unique
   /// groupOid из schedule.csv (если был)
   oid           String?
   kind          GroupKind
   /// Курс и факультет: у академической — по её студентам, у языковой — как у родительской группы
   course        Int?
   facultyId     String?
-  faculty       Faculty?       @relation(fields: [facultyId], references: [id], onDelete: SetNull)
+  faculty       Faculty?             @relation(fields: [facultyId], references: [id], onDelete: SetNull)
   /// Для языковой группы — академическая группа, частью которой она является
   parentId      String?
-  parent        Group?         @relation("GroupParent", fields: [parentId], references: [id], onDelete: SetNull)
-  children      Group[]        @relation("GroupParent")
+  parent        Group?               @relation("GroupParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children      Group[]              @relation("GroupParent")
   /// Студенты, у которых это академическая группа
   students      Student[]
   /// Студенты, у которых это языковая группа
@@ -120,6 +123,7 @@ model Group {
   lessons       LessonGroup[]
   deadlines     Deadline[]
   announcements Announcement[]
+  assignments   TeachingAssignment[]
 
   @@index([facultyId, course])
 }
@@ -178,17 +182,22 @@ model Staff {
 // ─── Расписание (из schedule.csv и campus-map.json; при импорте заменяется целиком) ─
 
 model Teacher {
-  id        String   @id @default(cuid())
+  id          String               @id @default(cuid())
   /// lecturerOid из schedule.csv (если пуст — краткое ФИО)
-  oid       String   @unique
+  oid         String               @unique
   /// «Арсеньева П.Н.»
-  shortName String
+  shortName   String
   /// «Арсеньева Полина Николаевна»
-  fullName  String
+  fullName    String
   /// «ст. преподаватель»
-  rank      String?
-  email     String?
-  lessons   Lesson[]
+  rank        String?
+  email       String?
+  /// Учётная запись (роль TEACHER). Есть у преподавателей с почтой; повторный импорт узнаёт её по oid.
+  userId      String?              @unique
+  user        User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
+  lessons     Lesson[]
+  assignments TeachingAssignment[]
+  gradesGiven Grade[]
 }
 
 /// Корпус. Страница карты читает campus-map.json напрямую (lib/campus-map/load.ts), а не эту таблицу;
@@ -234,13 +243,14 @@ model Room {
 }
 
 model Discipline {
-  id        String     @id @default(cuid())
-  name      String     @unique
+  id          String               @id @default(cuid())
+  name        String               @unique
   /// disciplineOid из schedule.csv (если был)
-  oid       String?
-  lessons   Lesson[]
-  grades    Grade[]
-  deadlines Deadline[]
+  oid         String?
+  lessons     Lesson[]
+  grades      Grade[]
+  deadlines   Deadline[]
+  assignments TeachingAssignment[]
 }
 
 enum LessonStatus {
@@ -319,26 +329,65 @@ model Deadline {
 
 // ─── Успеваемость ───────────────────────────────────────────────────
 
-enum GradeKind {
+/// Итоговый контроль дисциплины у группы — из расписания (занятие «Экзамен» или «Зачёт»)
+enum FinalKind {
   EXAM
   CREDIT
-  COURSEWORK
-  MIDTERM
 }
 
-model Grade {
+/// Кто ставит оценки: преподаватель × дисциплина × группа. Заполняет импорт из расписания:
+/// преподаватель ведёт у группы «Семинар» или «Практическое занятие» по дисциплине (без разовых замен).
+/// ЕДИНСТВЕННЫЙ источник правды для доступа преподавателя к студентам и оценкам.
+/// Группа — как в занятии: для языков — языковая подгруппа, иначе — академическая группа.
+model TeachingAssignment {
   id           String     @id @default(cuid())
-  studentId    String
-  student      Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  teacherId    String
+  teacher      Teacher    @relation(fields: [teacherId], references: [id], onDelete: Cascade)
   disciplineId String
-  discipline   Discipline @relation(fields: [disciplineId], references: [id])
-  semester     Int
-  kind         GradeKind
-  /// Для экзамена: «2»–«5». Для зачёта: «зачтено» / «не зачтено». Пусто — ещё не сдано.
-  value        String?
-  date         DateTime?
+  discipline   Discipline @relation(fields: [disciplineId], references: [id], onDelete: Cascade)
+  groupId      String
+  group        Group      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  /// Пусто — в расписании у пары «дисциплина × группа» нет ни экзамена, ни зачёта
+  finalKind    FinalKind?
+  /// Дата занятия «Экзамен» / «Зачёт» (по Москве)
+  finalDate    DateTime?  @db.Date
 
-  @@index([studentId, semester])
+  @@unique([teacherId, disciplineId, groupId])
+  @@index([groupId, disciplineId])
+}
+
+enum GradeKind {
+  /// Срез (1–3), баллы 0–100
+  CHECKPOINT
+  /// Экзамен, баллы 0–100
+  EXAM
+  /// Зачёт: зачтено / не зачтено
+  CREDIT
+}
+
+/// Оценка студента. Буква ECTS и 5-балльный эквивалент выводятся из баллов (lib/grades/scale.ts).
+model Grade {
+  id                String     @id @default(cuid())
+  studentId         String
+  student           Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  disciplineId      String
+  discipline        Discipline @relation(fields: [disciplineId], references: [id])
+  /// Номер семестра студента: 2 × (курс − 1) + 1 осенью (lib/grades/term.ts)
+  semester          Int
+  kind              GradeKind
+  /// Номер среза 1–3; у экзамена и зачёта — 0 (NULL в уникальном индексе не равен NULL)
+  checkpoint        Int        @default(0)
+  /// Баллы 0–100 — у среза и экзамена
+  points            Int?
+  /// Зачтено / не зачтено — у зачёта
+  passed            Boolean?
+  gradedByTeacherId String?
+  gradedBy          Teacher?   @relation(fields: [gradedByTeacherId], references: [id], onDelete: SetNull)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  @@unique([studentId, disciplineId, semester, kind, checkpoint])
+  @@index([disciplineId, semester])
 }
 
 // ─── Заявки и справки ───────────────────────────────────────────────
@@ -402,6 +451,8 @@ enum NotificationType {
   SCHEDULE_CHANGE
   REQUEST_STATUS
   DEADLINE
+  /// Новая оценка от преподавателя
+  GRADE
 }
 
 model Notification {

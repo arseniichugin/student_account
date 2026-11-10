@@ -9,7 +9,7 @@
  * Запуск: npm run db:seed (после npm run data:import). Повторный запуск даёт тот же результат.
  */
 import "dotenv/config";
-import type { GradeKind, NotificationType, RequestStatus } from "@/lib/generated/prisma/client";
+import type { NotificationType, RequestStatus } from "@/lib/generated/prisma/client";
 import { dbDateToIso, moscowDateTime } from "@/lib/moscow-time";
 import { createPrismaClient } from "@/lib/prisma-client";
 import { formatDayMonthLong } from "@/lib/schedule/dates";
@@ -173,80 +173,9 @@ async function main() {
   }
 
   // ─── Оценки ───────────────────────────────────────────────────────
-  console.log("Оценки…");
-  // Студент с «долгом» — второй тестовый (у него же отклонённая выписка) и ~4% остальных.
-  const isDebtor = (s: (typeof students)[number]) =>
-    (testStudents[1] ? s.id === testStudents[1].id : false) || (!s.user.isDemo && hash(s.externalId) % 25 === 0);
-  const debtors = new Set(students.filter(isDebtor).map((s) => s.id));
+  // Оценки текущего семестра появятся вместе с назначениями преподавателей (следующий шаг).
+  const grades: unknown[] = [];
   const debtSubject = new Map<string, string>();
-  const grades: {
-    studentId: string;
-    disciplineId: string;
-    semester: number;
-    kind: GradeKind;
-    value: string | null;
-    date: Date | null;
-  }[] = [];
-
-  for (const s of students) {
-    const rand = rng(`grades:${s.externalId}`);
-    const languageDisciplines = s.languageGroups.map((g) => ({ position: g.position, list: disciplinesOf(g.groupId) }));
-    const pastSemesters = 2 * (s.course - 1);
-    for (let sem = 1; sem <= pastSemesters; sem++) {
-      const year = Math.ceil(sem / 2);
-      const autumn = sem % 2 === 1;
-      // Сессия: зимняя — январь следующего года, летняя — июнь.
-      const sessionYear = ACADEMIC_YEAR_START - (s.course - year) + 1;
-      const month = autumn ? 1 : 6;
-      const items: { disciplineId: string; kind: GradeKind }[] = [];
-      (yearDisciplines.get(`${s.facultyId}:${year}`) ?? []).forEach((d, i) => {
-        items.push({ disciplineId: d, kind: (i + sem) % 2 === 0 ? "EXAM" : "CREDIT" });
-      });
-      for (const lang of languageDisciplines) {
-        for (const d of lang.list) items.push({ disciplineId: d, kind: lang.position === 1 && !autumn ? "EXAM" : "CREDIT" });
-      }
-      if (year >= 2 && !autumn && items.length > 0) {
-        items.push({ disciplineId: items[0]!.disciplineId, kind: "COURSEWORK" });
-      }
-      const isLastPast = sem === pastSemesters;
-      items.forEach((it, i) => {
-        const debt = debtors.has(s.id) && isLastPast && i === 0;
-        if (debt) debtSubject.set(s.id, disciplines.get(it.disciplineId)!);
-        const value =
-          it.kind === "CREDIT"
-            ? debt
-              ? "не зачтено"
-              : "зачтено"
-            : debt
-              ? "2"
-              : String(pick(rand, [3, 4, 4, 5, 5, 5]));
-        grades.push({
-          studentId: s.id,
-          disciplineId: it.disciplineId,
-          semester: sem,
-          kind: it.kind,
-          value,
-          date: msk(sessionYear, month, 12 + Math.floor(rand() * 16), 10),
-        });
-      });
-    }
-    // Текущий семестр: контрольные точки по дисциплинам из расписания (часть ещё не выставлена)
-    const current = [
-      ...new Set([s.academicGroupId, ...s.languageGroups.map((g) => g.groupId)].flatMap((g) => disciplinesOf(g))),
-    ];
-    current.forEach((d, i) => {
-      const graded = rand() < 0.75;
-      grades.push({
-        studentId: s.id,
-        disciplineId: d,
-        semester: pastSemesters + 1,
-        kind: "MIDTERM",
-        value: graded ? String(pick(rand, [3, 4, 4, 5, 5])) : null,
-        date: graded ? msk(2026, 10, 19 + (i % 12), 12) : null,
-      });
-    });
-  }
-  for (let i = 0; i < grades.length; i += 5000) await db.grade.createMany({ data: grades.slice(i, i + 5000) });
 
   // ─── Заявки ───────────────────────────────────────────────────────
   console.log("Заявки…");

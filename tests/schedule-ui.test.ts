@@ -175,10 +175,17 @@ describe("Адреса", () => {
 });
 
 describe("Меню", () => {
-  it("студент: 5 пунктов, сотрудник: 3; расписание и карта — у обоих", () => {
-    expect(NAV.STUDENT.map((i) => i.href)).toEqual(["/today", "/schedule", "/map", "/requests", "/profile"]);
+  it("студент: 6 пунктов, сотрудник: 3, преподаватель: 4; расписание и карта — у всех", () => {
+    expect(NAV.STUDENT.map((i) => i.href)).toEqual(["/today", "/schedule", "/grades", "/map", "/requests", "/profile"]);
     expect(NAV.STAFF.map((i) => i.href)).toEqual(["/staff", "/schedule", "/map"]);
-    expect(HOME).toEqual({ STUDENT: "/today", STAFF: "/staff" });
+    expect(NAV.TEACHER.map((i) => i.href)).toEqual(["/journal", "/schedule", "/map", "/teacher/profile"]);
+    expect(HOME).toEqual({ STUDENT: "/today", STAFF: "/staff", TEACHER: "/journal" });
+  });
+
+  it("каждый раздел меню есть в matcher proxy.ts (без cookie — сразу на вход)", async () => {
+    const { config } = await import("@/proxy");
+    const sections = new Set(Object.values(NAV).flatMap((items) => items.map((i) => `/${i.href.split("/")[1]}/:path*`)));
+    for (const s of sections) expect(config.matcher).toContain(s);
   });
 
   it("активный пункт — сам раздел и подстраницы, но не похожие адреса", () => {

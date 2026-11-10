@@ -23,20 +23,27 @@ export type StaffContext = {
   readonly [brand]: "StaffContext";
 };
 
-/** Любой вошедший пользователь — студент или сотрудник деканата. */
+/** Преподаватель (роль TEACHER): teacherId — запись Teacher, связанная с аккаунтом из сессии. */
+export type TeacherContext = {
+  readonly userId: string;
+  readonly teacherId: string;
+  readonly [brand]: "TeacherContext";
+};
+
+/** Любой вошедший пользователь — студент, сотрудник деканата или преподаватель. */
 export type UserContext = {
   readonly userId: string;
-  readonly role: "STUDENT" | "STAFF";
-  /** Факультет студента или сотрудника — например, для фильтра по умолчанию в поиске расписания. */
+  readonly role: "STUDENT" | "STAFF" | "TEACHER";
+  /** Факультет студента или сотрудника — например, для фильтра по умолчанию в поиске расписания. У преподавателя — null. */
   readonly facultyId: string | null;
   readonly [brand]: "UserContext";
 };
 
-/** Страница или действие только для студента. Иначе — на вход или в кабинет сотрудника. */
+/** Страница или действие только для студента. Иначе — на вход или в кабинет своей роли. */
 export const requireStudent = cache(async (): Promise<StudentContext> => {
   const session = await getCurrentSession();
   if (!session) redirect("/login");
-  if (session.user.role !== "STUDENT") redirect(HOME.STAFF);
+  if (session.user.role !== "STUDENT") redirect(HOME[session.user.role]);
 
   const student = await db.student.findUnique({
     where: { userId: session.user.id },
@@ -51,7 +58,7 @@ export const requireStudent = cache(async (): Promise<StudentContext> => {
 export const requireStaff = cache(async (): Promise<StaffContext> => {
   const session = await getCurrentSession();
   if (!session) redirect("/login");
-  if (session.user.role !== "STAFF") redirect(HOME.STUDENT);
+  if (session.user.role !== "STAFF") redirect(HOME[session.user.role]);
 
   const staff = await db.staff.findUnique({
     where: { userId: session.user.id },
@@ -62,8 +69,23 @@ export const requireStaff = cache(async (): Promise<StaffContext> => {
   return { userId: session.user.id, staffId: staff.id, facultyId: staff.facultyId } as StaffContext;
 });
 
+/** Страница или действие только для преподавателя (журнал оценок, профиль преподавателя). */
+export const requireTeacher = cache(async (): Promise<TeacherContext> => {
+  const session = await getCurrentSession();
+  if (!session) redirect("/login");
+  if (session.user.role !== "TEACHER") redirect(HOME[session.user.role]);
+
+  const teacher = await db.teacher.findUnique({
+    where: { userId: session.user.id },
+    select: { id: true },
+  });
+  if (!teacher) redirect("/login");
+
+  return { userId: session.user.id, teacherId: teacher.id } as TeacherContext;
+});
+
 /**
- * Страница или действие для любого вошедшего (студента или сотрудника):
+ * Страница или действие для любого вошедшего (студента, сотрудника или преподавателя):
  * например, расписание группы или преподавателя — это открытые данные вуза,
  * но без входа их не показываем. Без сессии — на страницу входа.
  */
@@ -83,9 +105,15 @@ export const getUserContext = cache(async (): Promise<UserContext | null> => {
 
   const user = await db.user.findUnique({
     where: { id: session.user.id },
-    select: { student: { select: { facultyId: true } }, staff: { select: { facultyId: true } } },
+    select: {
+      student: { select: { facultyId: true } },
+      staff: { select: { facultyId: true } },
+      teacher: { select: { id: true } },
+    },
   });
-  if (!user || (!user.student && !user.staff)) return null;
+  // Аккаунт без профиля своей роли (например, преподаватель исчез из расписания) — как без входа.
+  const profile = { STUDENT: user?.student, STAFF: user?.staff, TEACHER: user?.teacher }[session.user.role];
+  if (!user || !profile) return null;
 
   return {
     userId: session.user.id,

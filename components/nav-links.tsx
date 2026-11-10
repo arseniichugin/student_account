@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, FileText, Inbox, MapPinned, Sun, UserRound } from "lucide-react";
+import { CalendarDays, FileText, GraduationCap, Inbox, MapPinned, NotebookPen, Sun, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { isNavActive, type NavIcon, type NavItem } from "@/lib/navigation";
@@ -10,10 +10,12 @@ import { cn } from "@/lib/utils";
 const ICONS: Record<NavIcon, typeof Sun> = {
   sun: Sun,
   calendar: CalendarDays,
+  grades: GraduationCap,
   map: MapPinned,
   file: FileText,
   user: UserRound,
   inbox: Inbox,
+  journal: NotebookPen,
 };
 
 const STYLES = {
