@@ -3,10 +3,13 @@ import { db } from "@/lib/db";
 import type { StudentContext, TeacherContext } from "@/lib/auth/guards";
 import type { GradeKind, Prisma } from "@/lib/generated/prisma/client";
 import { gradeNotification } from "@/lib/grades/notification";
-import { overallAverage, scored, scoredAverage, type GradeLetter, type ScoredGrade } from "@/lib/grades/scale";
+import { letterFor, overallAverage, scored, scoredAverage, type GradeLetter, type ScoredGrade } from "@/lib/grades/scale";
+import { isFailingLetter, overallFromCheckpoints } from "@/lib/grades/stats";
 import {
   CHECKPOINTS,
   CHECKPOINT_NUMBERS,
+  FINAL_KIND_LABEL,
+  checkpointLabel,
   currentCheckpoint,
   semesterForCourse,
   semestersUpTo,
@@ -264,6 +267,66 @@ export async function getMyGrades(ctx: StudentContext, semester?: number | strin
       currentCheckpoint: currentCheckpoint(today),
       nextFinal: next ? { disciplineId: next.disciplineId, discipline: next.discipline, kind: next.final!.kind, date: next.final!.date! } : null,
     },
+  };
+}
+
+/** Последняя выставленная оценка — для блока «Оценки» на «Сегодня». */
+export type LatestGrade = {
+  disciplineId: string;
+  discipline: string;
+  /** «2-й срез», «Экзамен», «Зачёт» */
+  label: string;
+  /** Срез и экзамен — баллы с буквой; зачёт — null */
+  grade: ScoredGrade | null;
+  /** Зачёт — зачтено/не зачтено; иначе null */
+  passed: boolean | null;
+};
+
+export type MyGradesDigest = {
+  /** Итоговый балл текущего семестра («среднее из средних») или null — оценок нет */
+  overall: ScoredGrade | null;
+  /** Дисциплин, где есть FX/F или «не зачтено» */
+  failingDisciplines: number;
+  /** Последние выставленные оценки, новые сверху */
+  latest: LatestGrade[];
+};
+
+/**
+ * Кратко об оценках текущего семестра для «Сегодня»: итоговый балл и последние оценки.
+ * Только чтение и только оценки ctx.studentId. Итоговый балл — по тому же правилу, что и getMyGrades.
+ */
+export async function getMyGradesDigest(ctx: StudentContext, limit = 2): Promise<MyGradesDigest> {
+  const student = await db.student.findUniqueOrThrow({ where: { id: ctx.studentId }, select: { course: true } });
+  const rows = await db.grade.findMany({
+    where: { studentId: ctx.studentId, semester: semesterForCourse(student.course) },
+    select: {
+      disciplineId: true,
+      kind: true,
+      checkpoint: true,
+      points: true,
+      passed: true,
+      discipline: { select: { name: true } },
+    },
+    orderBy: [{ updatedAt: "desc" }, { checkpoint: "desc" }],
+  });
+  const checkpoints = rows.flatMap((r) =>
+    r.kind === "CHECKPOINT" && r.points != null ? [{ disciplineId: r.disciplineId, points: r.points }] : [],
+  );
+  const failing = new Set(
+    rows
+      .filter((r) => (r.kind === "CREDIT" ? r.passed === false : r.points != null && isFailingLetter(letterFor(r.points))))
+      .map((r) => r.disciplineId),
+  );
+  return {
+    overall: overallFromCheckpoints(checkpoints),
+    failingDisciplines: failing.size,
+    latest: rows.slice(0, Math.max(0, limit)).map((r) => ({
+      disciplineId: r.disciplineId,
+      discipline: r.discipline.name,
+      label: r.kind === "CHECKPOINT" ? checkpointLabel(r.checkpoint) : FINAL_KIND_LABEL[r.kind],
+      grade: r.kind !== "CREDIT" && r.points != null ? scored(r.points) : null,
+      passed: r.kind === "CREDIT" ? r.passed : null,
+    })),
   };
 }
 
