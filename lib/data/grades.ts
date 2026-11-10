@@ -457,10 +457,23 @@ export async function getMyAssignments(ctx: TeacherContext): Promise<TeacherAssi
     .sort((a, b) => byRu(a.discipline.name, b.discipline.name) || byRu(a.group.name, b.group.name));
 }
 
+const isPlausibleId = (id: unknown): id is string => typeof id === "string" && id.length > 0 && id.length <= 64;
+
 /** Своё назначение по id — или null (чужое, несуществующее, мусор в адресе). */
 function findMyAssignment(ctx: TeacherContext, assignmentId: string) {
-  if (typeof assignmentId !== "string" || assignmentId.length === 0 || assignmentId.length > 64) return null;
+  if (!isPlausibleId(assignmentId)) return null;
   return db.teachingAssignment.findFirst({ where: { id: assignmentId, teacherId: ctx.teacherId }, select: assignmentSelect });
+}
+
+/**
+ * Лёгкая проверка «это назначение моё» — для layout страницы журнала: layout выполняется до границы
+ * загрузки (loading.tsx), поэтому чужой или мусорный id получает настоящий HTTP 404, а не 200 со «скелетоном».
+ * Страница всё равно проверяет сама (getJournal) — двойной рубеж.
+ */
+export async function isMyAssignment(ctx: TeacherContext, assignmentId: string): Promise<boolean> {
+  if (!isPlausibleId(assignmentId)) return false;
+  const a = await db.teachingAssignment.findFirst({ where: { id: assignmentId, teacherId: ctx.teacherId }, select: { id: true } });
+  return a !== null;
 }
 
 /**

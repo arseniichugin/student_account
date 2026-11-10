@@ -44,6 +44,16 @@ export function getMyRequest(ctx: StudentContext, requestId: string) {
   });
 }
 
+/**
+ * Лёгкая проверка «это моя заявка» — для layout страницы заявки (выполняется до loading.tsx, поэтому
+ * чужой или мусорный id получает настоящий HTTP 404). Страница всё равно ищет только среди своих.
+ */
+export async function isMyRequest(ctx: StudentContext, requestId: string): Promise<boolean> {
+  if (typeof requestId !== "string" || requestId.length === 0 || requestId.length > 64) return false;
+  const r = await db.request.findFirst({ where: { id: requestId, studentId: ctx.studentId }, select: { id: true } });
+  return r !== null;
+}
+
 /** Защита от спама: сколько заявок может быть «в работе» одновременно и сколько можно подать за час. */
 export const MAX_ACTIVE_REQUESTS = 10;
 export const MAX_REQUESTS_PER_HOUR = 5;
