@@ -22,21 +22,24 @@ export function SemesterSwitcher({
   if (semesters.length < 2) return null;
   return (
     <nav aria-label="Семестры" className={className}>
-      <ul className="flex flex-wrap gap-2">
+      {/* Сегменты одинаковой ширины: 5 семестров 3-курсника помещаются в одну строку на 360 px */}
+      <ul className="flex w-full gap-1 rounded-xl bg-surface-muted p-1 lg:w-auto">
         {[...semesters].reverse().map((n) => {
           const active = n === shown;
           return (
-            <li key={n}>
+            <li key={n} className="min-w-0 flex-1 lg:flex-none">
               <Link
                 href={semesterHref(n, current)}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "inline-flex min-h-11 min-w-11 items-center justify-center rounded-full px-4 text-sm font-medium transition-colors",
-                  active ? "bg-primary text-on-primary" : "bg-surface-muted text-text hover:bg-border",
+                  "flex min-h-11 flex-col items-center justify-center rounded-lg px-1 text-[15px] leading-tight font-medium transition-colors lg:min-w-16 lg:px-3",
+                  active ? "bg-primary text-on-primary" : "text-text hover:bg-border",
                 )}
               >
-                {n}-й{n === current ? " · текущий" : ""}
-                <span className="sr-only"> семестр</span>
+                <span>
+                  {n}-й<span className="sr-only"> семестр</span>
+                </span>
+                {n === current && <span className={cn("text-[11px]", active ? "" : "text-muted")}>текущий</span>}
               </Link>
             </li>
           );

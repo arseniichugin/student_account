@@ -19,21 +19,21 @@ export function TodayGradesLink({ digest }: { digest: MyGradesDigest }) {
       <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary">
         <GraduationCap className="size-5" aria-hidden />
       </span>
-      <span className="flex min-w-0 flex-1 flex-col gap-1.5 lg:flex-row lg:items-center lg:gap-6">
-        <span className="flex items-center gap-2">
-          <span className="text-[17px] font-semibold">Оценки</span>
+      <span className="flex min-w-0 flex-1 flex-col gap-1.5 lg:flex-row lg:items-center lg:gap-5">
+        <span className="text-[17px] font-semibold">Оценки</span>
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
           {digest.overall ? (
             <>
               <GradeBadge grade={digest.overall} size="sm" />
-              <span className="text-sm text-muted">итоговый балл</span>
+              итоговый балл
             </>
           ) : (
-            <span className="text-sm text-muted">пока нет оценок</span>
+            "пока нет оценок"
           )}
         </span>
         {last && (
           <span className="min-w-0 text-sm text-muted">
-            Последняя: <span className="text-text">{last.discipline}</span>, {last.label.toLowerCase()} —{" "}
+            Последняя: <span className="text-text">{last.discipline}</span>, {last.label.toLowerCase().replace(" ", " ")} —{" "}
             {last.grade ? (
               <b className="font-semibold text-text">
                 {last.grade.letter} ({last.grade.points})
