@@ -31,7 +31,7 @@ export default async function GradesPage({ searchParams }: PageProps<"/grades">)
 
   return (
     <div className="space-y-5 lg:space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end lg:justify-between">
         <div>
           <h1 className="text-[28px] leading-tight font-bold lg:text-[32px]">Оценки</h1>
           <p className="mt-1 text-muted first-letter:uppercase">
