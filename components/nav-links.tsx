@@ -21,7 +21,9 @@ const ICONS: Record<NavIcon, typeof Sun> = {
 const STYLES = {
   bottom: {
     list: "flex",
-    item: "min-w-0 flex-1",
+    // flex-auto, а не flex-1: длинная подпись («Расписание») берёт чуть больше места, короткие — меньше.
+    // Так 6 пунктов студента помещаются на 360 px без обрезки; min-w-11 — область нажатия не уже 44 px.
+    item: "min-w-11 flex-auto",
     link: "flex min-h-14 flex-col items-center justify-center gap-0.5 px-0.5 text-[11px] font-medium",
     active: "text-primary",
     idle: "text-muted hover:text-text",
