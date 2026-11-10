@@ -131,10 +131,24 @@ describe("Проверка файлов вуза", () => {
 
   it("карта: повтор номера аудитории и неизвестный корпус — ошибки", () => {
     const map = JSON.parse(read("valid/campus-map.json"));
-    map.rooms.push({ number: "101", building: "a" }, { number: "999", building: "zzz" });
+    const room = { type: "Семинарская", floor: 1 };
+    map.rooms.push({ ...room, number: "101", building: "a" }, { ...room, number: "999", building: "zzz" });
     const errors = errorsOf({ ...validFiles(), map: JSON.stringify(map) });
-    expect(errors).toContain("campus-map.json, rooms[3] (номер «101»): номер аудитории «101» уже есть в rooms[0] — номера должны быть уникальными");
-    expect(errors).toContain("campus-map.json, rooms[4] (номер «999»): корпуса «zzz» нет в списке buildings");
+    expect(errors).toContain(
+      "campus-map.json, rooms[3] (номер «101»): поле «number» — номер «101» уже есть в rooms[0] — номера должны быть уникальными",
+    );
+    expect(errors).toContain("campus-map.json, rooms[4] (номер «999»): поле «building» — корпуса «zzz» нет в списке buildings");
+  });
+
+  it("карта: минимальный файл без обязательных полей отклоняется с понятной ошибкой", () => {
+    const map = { buildings: [{ id: "a", name: "Корпус А" }], rooms: [{ number: "101", building: "a" }] };
+    const errors = errorsOf({ ...validFiles(), map: JSON.stringify(map) });
+    expect(errors).toContain("campus-map.json, buildings[0] (id «a»): поле «floors» — обязательное поле не заполнено");
+    expect(errors).toContain("campus-map.json, rooms[0] (номер «101»): поле «type» — обязательное поле не заполнено");
+    expect(errorsOf({ ...validFiles(), map: "{ битый" })[0]).toMatch(/^campus-map\.json: не получается прочитать JSON/);
+    expect(errorsOf({ ...validFiles(), map: JSON.stringify({ rooms: [] }) })).toContain(
+      "campus-map.json, buildings: поле «buildings» — обязательное поле не заполнено",
+    );
   });
 
   it("нет карты — только предупреждение", () => {

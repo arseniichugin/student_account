@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -6,6 +7,7 @@ import { roomMapHref } from "@/lib/campus-map/links";
 import { loadCampusMap } from "@/lib/campus-map/load";
 import { findRoom } from "@/lib/campus-map/rooms";
 import { campusMapSchema } from "@/lib/campus-map/schema";
+import { validateUniversityData } from "@/lib/university-data/validate";
 
 // Карта кампуса: заменяемый файл data/university/campus-map.json — недоверенные данные.
 
@@ -34,6 +36,12 @@ const room = {
 };
 const valid = () => structuredClone({ buildings: [building], rooms: [room] });
 
+/** CSV из тестового набора: импорт проверяет карту вместе с расписанием и студентами. */
+const fixtureCsv = () => ({
+  students: readFileSync(path.join(root, "tests/fixtures/valid/students.csv"), "utf8"),
+  schedule: readFileSync(path.join(root, "tests/fixtures/valid/schedule.csv"), "utf8"),
+});
+
 describe("схема campus-map.json", () => {
   it("принимает текущий файл data/university/campus-map.json", async () => {
     const json = JSON.parse(await readFile(realFile, "utf8"));
@@ -51,6 +59,7 @@ describe("схема campus-map.json", () => {
     expect(Object.keys(parsed.data!).sort()).toEqual(["buildings", "rooms"]);
     expect(Object.keys(parsed.data!.rooms[0]!).sort()).toEqual(["bookable", "building", "capacity", "floor", "number", "purpose", "type", "wing"]);
     expect(Object.keys(parsed.data!.buildings[0]!).sort()).toEqual(["abbr", "address", "floors", "id", "name", "scheme", "wings"]);
+    expect(campusMapSchema.parse({ ...d, buildings: [{ ...building, maxRoom: 79 }] }).buildings[0]!.maxRoom).toBe(79);
   });
 
   const broken: [string, (d: ReturnType<typeof valid>) => unknown][] = [
@@ -105,6 +114,33 @@ describe("loadCampusMap: файл из UNIVERSITY_DATA_DIR", () => {
     const r = await loadCampusMap();
     expect(r.ok).toBe(false);
     expect(!r.ok && r.error).toMatch(/rooms\[0\]\.number/);
+  });
+
+  it("файл, принятый импортом, принимает и страница карты (одна схема)", async () => {
+    const files = ["tests/fixtures/valid/campus-map.json", "data/university/campus-map.json"];
+    for (const f of files) {
+      const text = await readFile(path.join(root, f), "utf8");
+      const imported = validateUniversityData({ ...fixtureCsv(), map: text });
+      expect(imported.ok, f).toBe(true);
+      await writeFile(path.join(dir, "campus-map.json"), `\uFEFF${text}`);
+      const r = await loadCampusMap();
+      expect(r.ok, f).toBe(true);
+      expect(r.ok && r.data.rooms.length).toBe(JSON.parse(text).rooms.length);
+    }
+  });
+
+  it("файл, отклонённый страницей карты, отклоняет и импорт", async () => {
+    const broken = [
+      { buildings: [building], rooms: [{ ...room, type: undefined }] },
+      { buildings: [building], rooms: [room, { ...room, number: "1001 " }] },
+      { buildings: [building, { ...building, id: "second" }], rooms: [] },
+      { buildings: [{ ...building, floors: [] }], rooms: [] },
+    ];
+    for (const map of broken) {
+      await writeFile(path.join(dir, "campus-map.json"), JSON.stringify(map));
+      expect((await loadCampusMap()).ok).toBe(false);
+      expect(validateUniversityData({ ...fixtureCsv(), map: JSON.stringify(map) }).ok).toBe(false);
+    }
   });
 
   it("правильный файл читается без пересборки, текст с HTML остаётся просто текстом", async () => {

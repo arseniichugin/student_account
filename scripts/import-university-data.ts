@@ -13,8 +13,8 @@
 import "dotenv/config";
 import path from "node:path";
 import { createPrismaClient } from "../lib/prisma-client";
-import { DEFAULT_DEMO_PASSWORD, ImportError, importUniversityData } from "../lib/university-data/import";
-import { DEFAULT_DATA_DIR, loadUniversityData } from "../lib/university-data/load";
+import { DEFAULT_DEMO_PASSWORD, ImportError, importUniversityData, testLoginsFromEnv } from "../lib/university-data/import";
+import { loadUniversityData, universityDataDir } from "../lib/university-data/load";
 import { formatIssue } from "../lib/university-data/validate";
 
 const MAX_ERRORS_SHOWN = 30;
@@ -31,7 +31,7 @@ const n = (x: number) => x.toLocaleString("ru-RU");
 
 async function main(): Promise<number> {
   const started = Date.now();
-  const dir = path.resolve(argValue("--dir") ?? process.env.UNIVERSITY_DATA_DIR ?? DEFAULT_DATA_DIR);
+  const dir = path.resolve(argValue("--dir") ?? universityDataDir());
   const checkOnly = process.argv.includes("--check");
   const credentialsPath = path.resolve(argValue("--credentials") ?? process.env.CREDENTIALS_FILE ?? "credentials.csv");
 
@@ -70,7 +70,7 @@ async function main(): Promise<number> {
     console.log("\nЗагружаю в базу (одна транзакция: всё или ничего)…");
     const summary = await importUniversityData(db, d, {
       demoPassword: process.env.DEMO_PASSWORD || DEFAULT_DEMO_PASSWORD,
-      testLogins: process.env.TEST_STUDENT_LOGINS?.split(",").map((s) => s.trim()).filter(Boolean) ?? null,
+      testLogins: testLoginsFromEnv(),
       credentialsPath,
       log: (m) => console.log(`  ${m}`),
     });

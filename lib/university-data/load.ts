@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import { CAMPUS_MAP_MAX_BYTES } from "../campus-map/schema";
 import {
   MAP_FILE,
   SCHEDULE_FILE,
@@ -13,8 +14,17 @@ import {
 export const DEFAULT_DATA_DIR = "data/university";
 
 /**
- * Предел размера каждого файла. Основной набор — несколько мегабайт (расписание ~8 МБ);
+ * Папка с заменяемыми файлами вуза — одна для импорта, тестов и страницы карты:
+ * env UNIVERSITY_DATA_DIR или <текущая папка (корень проекта)>/data/university.
+ */
+export function universityDataDir(): string {
+  return path.resolve(process.env.UNIVERSITY_DATA_DIR || path.join(process.cwd(), DEFAULT_DATA_DIR));
+}
+
+/**
+ * Предел размера CSV-файлов. Основной набор — несколько мегабайт (расписание ~8 МБ);
  * файл в сотни мегабайт — почти наверняка ошибка, и читать его в память целиком не стоит.
+ * У campus-map.json предел свой — CAMPUS_MAP_MAX_BYTES, тот же, что у страницы карты.
  */
 export const MAX_FILE_BYTES = 50 * 1024 * 1024;
 
@@ -30,11 +40,12 @@ export function loadUniversityData(dir: string, maxBytes = MAX_FILE_BYTES): Vali
     const file = path.join(dir, name);
     if (!existsSync(file)) continue;
     const size = statSync(file).size;
-    if (size > maxBytes) {
+    const limit = name === MAP_FILE ? Math.min(maxBytes, CAMPUS_MAP_MAX_BYTES) : maxBytes;
+    if (size > limit) {
       const mb = (n: number) => (n / 1024 / 1024).toLocaleString("ru-RU", { maximumFractionDigits: 1 });
       tooBig.push({
         file: name,
-        message: `файл слишком большой: ${mb(size)} МБ, допустимо не больше ${mb(maxBytes)} МБ. Проверьте, тот ли это файл`,
+        message: `файл слишком большой: ${mb(size)} МБ, допустимо не больше ${mb(limit)} МБ. Проверьте, тот ли это файл`,
       });
     }
   }

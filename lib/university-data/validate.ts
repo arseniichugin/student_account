@@ -7,13 +7,14 @@
  * Формат файлов описан в data/university/README.md.
  */
 import { z } from "zod";
+import { CAMPUS_MAP_FILE, formatIssuePath, parseCampusMap, type CampusMapIssue } from "../campus-map/schema";
 import { isIsoDate } from "../moscow-time";
 import { CsvSyntaxError, parseCsv, type CsvTable } from "./csv";
 import { translit } from "./translit";
 
 export const STUDENTS_FILE = "students.csv";
 export const SCHEDULE_FILE = "schedule.csv";
-export const MAP_FILE = "campus-map.json";
+export const MAP_FILE = CAMPUS_MAP_FILE;
 
 /** Логины сотрудников деканата: dekanat.<код факультета латиницей>. */
 export const STAFF_LOGIN_PREFIX = "dekanat.";
@@ -620,117 +621,72 @@ export function staffLoginForFaculty(code: string): string {
 
 // ─── campus-map.json ────────────────────────────────────────────────
 
-const nullableString = z.string().trim().nullish();
-const mapBuildingSchema = z.object({
-  id: z.union([z.string(), z.number()]).transform(String).pipe(z.string().trim().min(1, "пустое значение")),
-  name: z.string("ожидается строка").trim().min(1, "пустое значение"),
-  abbr: nullableString,
-  address: nullableString,
-  floors: z.array(z.number().int(), "ожидается список целых чисел").nullish(),
-  wings: z.array(z.number().int().nullable(), "ожидается список чисел").nullish(),
-  maxRoom: z.number("ожидается число").int().nullish(),
-  scheme: nullableString,
-});
-const mapRoomSchema = z.object({
-  number: z.union([z.string(), z.number()], "ожидается строка").transform(String).pipe(z.string().trim().min(1, "пустое значение")),
-  building: z.union([z.string(), z.number()], "ожидается id корпуса").transform(String).pipe(z.string().trim().min(1, "пустое значение")),
-  type: nullableString,
-  capacity: z.number("ожидается число").int().min(0, "не может быть меньше 0").nullish(),
-  floor: z.number("ожидается число").int().nullish(),
-  wing: z.number("ожидается число").int().nullish(),
-  purpose: nullableString,
-  bookable: z.boolean("ожидается true или false").nullish(),
-});
-const mapRootSchema = z.object({
-  buildings: z.array(z.unknown(), "ожидается список корпусов"),
-  rooms: z.array(z.unknown(), "ожидается список аудиторий"),
-});
-
 type ParsedMap = { buildings: BuildingData[]; rooms: RoomData[] };
 
+/**
+ * Карту проверяет та же схема, что и страница /map (lib/campus-map/schema.ts), —
+ * файл, принятый импортом, карта тоже покажет. Ошибки Zod превращаются в «rooms[3] (номер «101»): поле …».
+ */
 function validateMap(text: string, issues: Issues): ParsedMap | null {
   const file = MAP_FILE;
-  let json: unknown;
-  try {
-    json = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
-  } catch (e) {
-    issues.error({ file, message: `не получается прочитать JSON: ${(e as Error).message}` });
+  const parsed = parseCampusMap(text);
+  if (!parsed.ok && parsed.reason === "json") {
+    issues.error({ file, message: `не получается прочитать JSON: ${parsed.message}` });
     return null;
   }
-  const root = mapRootSchema.safeParse(json);
-  if (!root.success) {
-    for (const iss of root.error.issues) {
-      issues.error({ file, message: `поле «${iss.path.join(".") || "(корень)"}» — ${iss.message}` });
-    }
+  if (!parsed.ok) {
+    const raw = parsedJson(text);
+    for (const iss of parsed.issues) issues.error({ file, ...describeMapIssue(iss, raw), message: mapIssueMessage(iss) });
     return null;
   }
-  const buildings: BuildingData[] = [];
-  const buildingIds = new Map<string, number>();
-  const buildingNames = new Map<string, number>();
-  root.data.buildings.forEach((raw, i) => {
-    const where = `buildings[${i}]`;
-    const b = mapBuildingSchema.safeParse(raw);
-    if (!b.success) {
-      for (const iss of b.error.issues) issues.error({ file, where, message: `поле «${iss.path.join(".")}» — ${iss.message}` });
-      return;
-    }
-    const d = b.data;
-    if (buildingIds.has(d.id)) {
-      issues.error({ file, where, message: `id корпуса ${shown(d.id)} уже есть в buildings[${buildingIds.get(d.id)}]` });
-      return;
-    }
-    if (buildingNames.has(d.name)) {
-      issues.error({ file, where, message: `название корпуса ${shown(d.name)} уже есть в buildings[${buildingNames.get(d.name)}]` });
-      return;
-    }
-    buildingIds.set(d.id, i);
-    buildingNames.set(d.name, i);
-    buildings.push({
-      key: d.id,
-      name: d.name,
-      abbr: d.abbr ?? null,
-      address: d.address ?? null,
-      floors: d.floors ?? [],
-      wings: d.wings ?? null,
-      maxRoom: d.maxRoom ?? null,
-      scheme: d.scheme ?? null,
-      onMap: true,
-    });
-  });
-
-  const rooms: RoomData[] = [];
-  const roomNumbers = new Map<string, number>();
-  root.data.rooms.forEach((raw, i) => {
-    const r = mapRoomSchema.safeParse(raw);
-    const num = (raw as { number?: unknown } | null)?.number;
-    const where = `rooms[${i}]${num !== undefined ? ` (номер ${shown(num)})` : ""}`;
-    if (!r.success) {
-      for (const iss of r.error.issues) issues.error({ file, where, message: `поле «${iss.path.join(".")}» — ${iss.message}` });
-      return;
-    }
-    const d = r.data;
-    if (roomNumbers.has(d.number)) {
-      issues.error({ file, where, message: `номер аудитории ${shown(d.number)} уже есть в rooms[${roomNumbers.get(d.number)}] — номера должны быть уникальными` });
-      return;
-    }
-    if (!buildingIds.has(d.building)) {
-      issues.error({ file, where, message: `корпуса ${shown(d.building)} нет в списке buildings` });
-      return;
-    }
-    roomNumbers.set(d.number, i);
-    rooms.push({
-      number: d.number,
-      buildingKey: d.building,
-      type: d.type ?? null,
-      capacity: d.capacity ?? null,
-      floor: d.floor ?? null,
-      wing: d.wing ?? null,
-      purpose: d.purpose ?? null,
-      bookable: d.bookable ?? true,
-      onMap: true,
-    });
-  });
+  const buildings: BuildingData[] = parsed.data.buildings.map((b) => ({
+    key: b.id,
+    name: b.name,
+    abbr: b.abbr,
+    address: b.address,
+    floors: b.floors,
+    wings: b.wings,
+    maxRoom: b.maxRoom ?? null,
+    scheme: b.scheme || null,
+    onMap: true,
+  }));
+  const rooms: RoomData[] = parsed.data.rooms.map((r) => ({
+    number: r.number,
+    buildingKey: r.building,
+    type: r.type,
+    capacity: r.capacity ?? null,
+    floor: r.floor,
+    wing: r.wing ?? null,
+    purpose: r.purpose ?? null,
+    bookable: r.bookable ?? true,
+    onMap: true,
+  }));
   return { buildings, rooms };
+}
+
+function parsedJson(text: string): unknown {
+  try {
+    return JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+  } catch {
+    return null;
+  }
+}
+
+/** Место ошибки: «rooms[3] (номер «101»)» — номер помогает найти запись в большом файле. */
+function describeMapIssue(iss: CampusMapIssue, raw: unknown): { where?: string } {
+  const [list, index] = iss.path;
+  if (typeof list !== "string") return {};
+  if (typeof index !== "number") return { where: list };
+  const item = (raw as Record<string, unknown[]> | null)?.[list]?.[index] as Record<string, unknown> | undefined;
+  const label = list === "rooms" ? item?.number : item?.id;
+  const hint = typeof label === "string" || typeof label === "number" ? ` (${list === "rooms" ? "номер" : "id"} ${shown(label)})` : "";
+  return { where: `${list}[${index}]${hint}` };
+}
+
+function mapIssueMessage(iss: CampusMapIssue): string {
+  const field = formatIssuePath(iss.path.slice(2));
+  if (field) return `поле «${field}» — ${iss.message}`;
+  return iss.path.length === 0 ? iss.message : `поле «${formatIssuePath(iss.path)}» — ${iss.message}`;
 }
 
 // ─── Сборка набора данных ───────────────────────────────────────────

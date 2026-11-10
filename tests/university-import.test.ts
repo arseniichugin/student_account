@@ -13,10 +13,13 @@ import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { db } from "@/lib/db";
 import { ROLE_STUDENT, credentialsCsv } from "@/lib/university-data/credentials";
 import { parseCsv } from "@/lib/university-data/csv";
-import { DEFAULT_DEMO_PASSWORD, importUniversityData } from "@/lib/university-data/import";
-import { loadUniversityData } from "@/lib/university-data/load";
+import { DEFAULT_DEMO_PASSWORD, importUniversityData, testLoginsFromEnv } from "@/lib/university-data/import";
+import { loadUniversityData, universityDataDir } from "@/lib/university-data/load";
 
 const tmp = mkdtempSync(path.join(tmpdir(), "import-again-"));
+// Те же тестовые аккаунты, что выбирает скрипт импорта: иначе при заданной TEST_STUDENT_LOGINS
+// тест «сбросил» бы их на автоматически выбранных студентов.
+const testLogins = testLoginsFromEnv();
 
 afterAll(async () => {
   rmSync(tmp, { recursive: true, force: true });
@@ -42,7 +45,7 @@ async function snapshot() {
 
 describe("Повторный импорт", () => {
   it("идемпотентен: те же студенты и группы, заявки и оценки на месте, пароли не меняются", async () => {
-    const result = loadUniversityData(path.resolve(process.env.UNIVERSITY_DATA_DIR || "data/university"));
+    const result = loadUniversityData(universityDataDir());
     if (!result.ok) throw new Error("основной набор данных не проходит проверку");
 
     const before = await snapshot();
@@ -51,6 +54,7 @@ describe("Повторный импорт", () => {
 
     const summary = await importUniversityData(db, result.data, {
       demoPassword: process.env.DEMO_PASSWORD || DEFAULT_DEMO_PASSWORD,
+      testLogins,
       credentialsPath,
     });
     expect(summary.createdAccounts).toBe(0);
@@ -68,7 +72,7 @@ describe("Повторный импорт", () => {
 
     // Тестовым аккаунтам и деканатам импорт ставит DEMO_PASSWORD
     const demo = after.users.filter((u) => u.isDemo);
-    expect(demo.length).toBe(3 + result.data.faculties.length);
+    expect(demo.length).toBe((testLogins?.length ?? 3) + result.data.faculties.length);
     for (const u of demo) expect(await verifyPassword(u.passwordHash, process.env.DEMO_PASSWORD || DEFAULT_DEMO_PASSWORD)).toBe(true);
 
     // Новых аккаунтов нет — в файле только тестовые студенты и деканаты, UTF-8 с BOM и «;»
@@ -80,9 +84,13 @@ describe("Повторный импорт", () => {
   }, 180_000);
 
   it("логины, почта и зачётки могут «переехать» между студентами — пароли остаются у аккаунтов", async () => {
-    const result = loadUniversityData(path.resolve(process.env.UNIVERSITY_DATA_DIR || "data/university"));
+    const result = loadUniversityData(universityDataDir());
     if (!result.ok) throw new Error("основной набор данных не проходит проверку");
-    const options = { demoPassword: process.env.DEMO_PASSWORD || DEFAULT_DEMO_PASSWORD, credentialsPath: path.join(tmp, "swap.csv") };
+    const options = {
+      demoPassword: process.env.DEMO_PASSWORD || DEFAULT_DEMO_PASSWORD,
+      testLogins,
+      credentialsPath: path.join(tmp, "swap.csv"),
+    };
     // Два обычных (не тестовых) студента меняются почтой и зачёткой
     const demoLogins = new Set((await db.user.findMany({ where: { isDemo: true }, select: { login: true } })).map((u) => u.login));
     const [a, b] = result.data.students.filter((s) => !demoLogins.has(s.login)).slice(10, 12);
@@ -111,14 +119,19 @@ describe("Повторный импорт", () => {
   }, 180_000);
 
   it("бывший тестовый студент получает новый пароль, сменившееся ФИО закрывает сессии, пароли из .tmp не теряются", async () => {
-    const result = loadUniversityData(path.resolve(process.env.UNIVERSITY_DATA_DIR || "data/university"));
+    const result = loadUniversityData(universityDataDir());
     if (!result.ok) throw new Error("основной набор данных не проходит проверку");
     const demoPassword = process.env.DEMO_PASSWORD || DEFAULT_DEMO_PASSWORD;
     const credentialsPath = path.join(tmp, "former.csv");
 
-    const testLogins = (await db.user.findMany({ where: { isDemo: true, role: "STUDENT" }, select: { login: true }, orderBy: { login: "asc" } })).map((u) => u.login);
-    const [dropped, ...keptTest] = testLogins;
-    const regular = result.data.students.filter((s) => !testLogins.includes(s.login));
+    const demoStudents = await db.user.findMany({
+      where: { isDemo: true, role: "STUDENT" },
+      select: { login: true },
+      orderBy: { login: "asc" },
+    });
+    const demoStudentLogins = demoStudents.map((u) => u.login);
+    const [dropped, ...keptTest] = demoStudentLogins;
+    const regular = result.data.students.filter((s) => !demoStudentLogins.includes(s.login));
     const substitute = regular[20]!; // становится тестовым вместо dropped
     const renamed = regular[21]!; // тот же «ID студента», но другая фамилия
     const recovered = regular[22]!; // его пароль есть только в credentials.csv.tmp прошлого импорта
@@ -165,7 +178,7 @@ describe("Повторный импорт", () => {
       expect(creds.has(renamed.login)).toBe(false);
       expect(summary.warnings.some((w) => w.includes("перенесено в основной файл строк 1, отброшено недействительных 1"))).toBe(true);
     } finally {
-      await importUniversityData(db, result.data, { demoPassword, credentialsPath });
+      await importUniversityData(db, result.data, { demoPassword, testLogins, credentialsPath });
       // Пароли обычных студентов, которых тест трогал, — как были
       for (const u of [substituteUser!, recoveredUser!]) await db.user.update({ where: { id: u.id }, data: { passwordHash: u.passwordHash } });
     }

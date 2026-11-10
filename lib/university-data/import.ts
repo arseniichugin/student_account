@@ -30,6 +30,15 @@ import { pickTestStudents, staffLoginForFaculty, type StudentData, type Universi
 
 export const DEFAULT_DEMO_PASSWORD = "Hogwarts2026";
 
+/**
+ * Логины тестовых студентов из env TEST_STUDENT_LOGINS («логин1,логин2»); null — выбрать автоматически.
+ * Один разбор для скрипта импорта и тестов: тест, запущенный с той же переменной, не сбросит аккаунты.
+ */
+export function testLoginsFromEnv(value = process.env.TEST_STUDENT_LOGINS): string[] | null {
+  const logins = value?.split(",").map((s) => s.trim()).filter(Boolean) ?? [];
+  return logins.length > 0 ? logins : null;
+}
+
 /** Вымышленные сотрудники деканатов; выбираются по номеру факультета — детерминированно. */
 const STAFF_NAMES = [
   "Морозова Ольга Сергеевна",
