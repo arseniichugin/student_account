@@ -25,14 +25,14 @@ function cameFromCabinet(): boolean {
   }
 }
 
-/** «← Назад к расписанию» — только если на карту пришли из кабинета; на сервере кнопки нет. */
+/** «← Назад» (туда, откуда пришли: «Сегодня», расписание, заявка) — только если на карту пришли из кабинета; на сервере кнопки нет. */
 export function BackToScheduleButton() {
   const visible = useSyncExternalStore(subscribe, cameFromCabinet, () => false);
   if (!visible) return null;
   return (
     <Button type="button" variant="ghost" size="sm" className="-ml-3 min-h-11" onClick={() => window.history.back()}>
       <ArrowLeft className="size-4" aria-hidden />
-      Назад к расписанию
+      Назад
     </Button>
   );
 }

@@ -8,7 +8,12 @@
  *
  * Параметры mount: data — { buildings, rooms }; onSelect(room) — пользователь выбрал помещение;
  * onClear() — закрыл карточку помещения; hash: false — не читать и не менять #room=… в адресе
- * (в кабинете адресом управляет страница: /map?room=…).
+ * (в кабинете адресом управляет страница: /map?room=…); headingLevel — уровень заголовка плана
+ * (по умолчанию 2: на странице над картой есть h1); insets() — { top, bottom }: сколько пикселей
+ * сверху и снизу окна закрыто шапкой и нижним меню (чтобы выбранная аудитория не пряталась под ними).
+ *
+ * Доступность: фокус после перерисовки возвращается на нажатую кнопку; после выбора помещения —
+ * на заголовок карточки; Esc закрывает карточку, фокус — на ячейку аудитории.
  *
  * Безопасность: данные карты заменяемые, значит недоверенные. В DOM они попадают ТОЛЬКО через
  * textContent и setAttribute (функции h() и el()) — браузер не разбирает их как HTML.
@@ -90,11 +95,18 @@
     return items;
   }
 
+  let mountNo = 0;
+  const narrowOf = el => el.clientWidth > 0 && el.clientWidth < 700;
+
   function mount(root, opts) {
     opts = opts || {};
     const data = opts.data || window.CAMPUS_DATA;
     if (!data) throw new Error('HogwartsMap: нет данных (campus-data.js / campus-data.json)');
     const useHash = opts.hash !== false;
+    const LEVEL = Math.min(Math.max(opts.headingLevel || 2, 1), 5);
+    const hx = (offset) => 'h' + Math.min(LEVEL + offset, 6);
+    const insets = () => { try { return Object.assign({ top: 0, bottom: 0 }, opts.insets && opts.insets()); } catch { return { top: 0, bottom: 0 }; } };
+    const uid = 'hm' + (++mountNo);
     const B = Object.fromEntries(data.buildings.map(b => [b.id, b]));
     // помещения неизвестного корпуса пропускаем, а не падаем на них
     const rooms = data.rooms.filter(r => own(B, r.building));
@@ -108,23 +120,28 @@
     const search = h('input', 'hm-search', bar);
     Object.assign(search, { type: 'search', placeholder: 'Аудитория, деканат, кафедра…' });
     search.setAttribute('aria-label', 'Поиск помещения');
+    search.setAttribute('aria-controls', uid + '-results');
     const bSel = h('select', 'hm-select', bar); bSel.setAttribute('aria-label', 'Корпус');
     h('option', null, bSel, 'Весь кампус').value = '';
     data.buildings.forEach(b => { h('option', null, bSel, b.name).value = b.id; });
-    const fTabs = h('div', 'hm-floors', bar); fTabs.setAttribute('role', 'tablist');
-    const results = h('ul', 'hm-results', root); results.hidden = true;
+    // этажи — кнопки-переключатели (aria-pressed): вкладок с панелями здесь нет
+    const fTabs = h('div', 'hm-floors', bar); fTabs.setAttribute('role', 'group'); fTabs.setAttribute('aria-label', 'Этаж');
+    const results = h('ul', 'hm-results', root); results.hidden = true; results.id = uid + '-results';
+    // число найденного озвучивается экранным диктором
+    const live = h('p', 'hm-sr', root); live.setAttribute('role', 'status'); live.setAttribute('aria-live', 'polite');
     const campusBox = h('div', 'hm-campus', root);
     const stage = h('div', 'hm-stage', root);
     const crumbs = h('div', 'hm-crumbs', stage);
     const legend = h('div', 'hm-legend', stage);
     const svgWrap = h('div', 'hm-svg', stage);
+    // карточка — сразу под планом: на телефоне аудитория и её описание помещаются на одном экране
+    const card = h('aside', 'hm-card', stage); card.hidden = true; card.setAttribute('aria-labelledby', uid + '-card-title');
     const about = h('div', 'hm-about', stage);
-    const card = h('aside', 'hm-card', root); card.hidden = true;
     const dir = h('details', 'hm-dir', root);
 
     const notice = h('p', 'hm-notice', root); notice.hidden = true; root.insertBefore(notice, results);
     const chips = {};
-    state.fit = root.clientWidth > 0 && root.clientWidth < 700;   // на узком экране этаж сразу вписан по ширине
+    state.fit = narrowOf(root);   // на узком экране этаж сразу вписан по ширине
     LEGEND.forEach(([cls, name]) => {
       const b = h('button', 'hm-chip t-' + cls, legend);
       chips[cls] = b;
@@ -138,13 +155,13 @@
     });
     h('summary', null, dir, 'Все деканаты и кафедры');
     [['dean', 'Деканаты'], ['chair', 'Кафедры']].forEach(([c, title]) => {
-      h('h4', null, dir, title);
+      h(hx(0), null, dir, title);
       const ul = h('ul', null, dir);
       rooms.filter(r => cat(r) === c).sort((a, b) => a.purpose.localeCompare(b.purpose, 'ru')).forEach(r => {
         const b = h('button', 'hm-dir-item t-' + c, h('li', null, ul)); b.type = 'button';
         h('span', null, b, r.purpose);
         h('small', null, b, `${r.number} · ${B[r.building].abbr}, ${r.floor} эт.`);
-        b.onclick = () => select(r);
+        b.onclick = () => select(r, 'list');
       });
     });
 
@@ -191,11 +208,19 @@
       all.sort((a, b) => (a.bx[0] + a.bx[1] + a.bx[2] + a.bx[3]) - (b.bx[0] + b.bx[1] + b.bx[2] + b.bx[3]));
       const groups = {};
       ids.forEach(id => {
-        const g = el('g', { class: 'hm-iso-bld' + (state.building === id ? ' sel' : ''), tabindex: 0, role: 'button', 'aria-label': B[id].name });
-        g.onclick = () => setView(id);
-        g.onkeydown = e => { if (e.key === 'Enter') setView(id); };
+        const g = el('g', { class: 'hm-iso-bld' + (state.building === id ? ' sel' : ''), tabindex: 0, role: 'button',
+          'aria-label': B[id].name, 'aria-pressed': String(state.building === id), 'data-bid': id });
+        const open = () => { setView(id); refocus('.hm-iso-bld[data-bid="' + id + '"]', campusBox); };
+        g.onclick = open;
+        g.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
         el('title', null, g, B[id].name);
         groups[id] = g;
+      });
+      // невидимая область нажатия вокруг корпуса: на телефоне башня обсерватории и манеж меньше пальца
+      ids.forEach(id => {
+        const [x0, y0, x1, y1, fl] = BOXES[id][0], m = id === 'obs' ? 60 : 20, z = fl * 14 + m;
+        const hull = [ISO(x0 - m, y0 - m, z), ISO(x1 + m, y0 - m, z), ISO(x1 + m, y0 - m, 0), ISO(x1 + m, y1 + m, 0), ISO(x0 - m, y1 + m, 0), ISO(x0 - m, y1 + m, z)];
+        el('polygon', { class: 'hm-hit', points: pts(hull) }, groups[id]);
       });
       all.forEach(({ id, bx }) => {
         const [x0, y0, x1, y1, fl] = bx, z = fl * 14, g = groups[id];
@@ -222,8 +247,9 @@
       const dim = state.filter.size && !state.filter.has(c);
       const g = el('g', {
         class: `hm-room t-${c}${dim ? ' dim' : ''}${state.selected === r ? ' sel' : ''}`,
-        tabindex: 0, role: 'button', 'aria-label': `${r.number}, ${r.purpose || r.type}`
+        tabindex: 0, role: 'button', 'aria-label': `${r.number}, ${r.purpose || r.type}`, 'data-number': r.number
       }, svg);
+      if (state.selected === r) g.setAttribute('aria-current', 'true');
       el('rect', { x, y, width: w, height: hgt }, g);
       const badge = { dean: 'Д', chair: 'К', adm: 'С' }[c];
       const vertical = w < 40 && hgt > w;
@@ -244,8 +270,8 @@
         el('text', { x: bx, y: by, 'text-anchor': 'middle', 'dominant-baseline': 'central', class: 'hm-badge-t' }, g, badge);
       }
       el('title', null, g, `${r.number} — ${r.purpose || r.type}${r.bookable ? `, ${r.capacity} мест` : ''}`);
-      g.onclick = () => select(r);
-      g.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(r); } };
+      g.onclick = () => select(r, 'plan');
+      g.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(r, 'plan'); } };
     }
     const TECH_NAMES = ['Кладовая', 'Техническое помещение', 'Подсобное помещение', 'Электрощитовая', 'Хозблок'];
     let techNo = 0;
@@ -455,12 +481,12 @@
       h('p', null, about, base + (deans.length ? ` Здесь расположены деканаты факультетов ${deans.join(', ')}.` : ''));
       const marked = list.filter(r => r.purpose);
       if (marked.length) {
-        h('h4', null, about, 'На этом этаже');
+        h(hx(1), null, about, 'На этом этаже');
         const ul = h('ul', 'hm-onfloor', about);
         marked.sort((a, b) => cat(a).localeCompare(cat(b)) || a.number.localeCompare(b.number)).forEach(r => {
           const bt = h('button', 't-' + cat(r), h('li', null, ul)); bt.type = 'button';
           h('b', null, bt, r.number); h('span', null, bt, r.purpose);
-          bt.onclick = () => select(r);
+          bt.onclick = () => select(r, 'list');
         });
       }
     }
@@ -470,10 +496,17 @@
       if (!state.building || B[state.building].floors.length < 2) return;
       B[state.building].floors.forEach(f => {
         const t = h('button', 'hm-floor', fTabs, f + ' эт.');
-        t.type = 'button'; t.setAttribute('role', 'tab');
-        t.setAttribute('aria-selected', f === state.floor);
-        t.onclick = () => setView(state.building, f);
+        t.type = 'button'; t.dataset.floor = f;
+        t.setAttribute('aria-pressed', String(f === state.floor));
+        t.setAttribute('aria-label', f + ' этаж');
+        t.onclick = () => { setView(state.building, f); refocus('.hm-floor[data-floor="' + f + '"]', fTabs); };
       });
+    }
+
+    /* render() пересоздаёт кнопки и схемы — фокус возвращаем на новую кнопку с тем же data-*. */
+    function refocus(selector, scope) {
+      const n = (scope || root).querySelector(selector);
+      if (n && n.focus) n.focus({ preventScroll: true });
     }
 
     function render() {
@@ -487,13 +520,15 @@
       }
       stage.hidden = false;
       const b = B[state.building];
-      h('h3', null, crumbs, b.name + (b.floors.length > 1 ? `, ${state.floor}-й этаж` : ''));
+      h(hx(0), null, crumbs, b.name + (b.floors.length > 1 ? `, ${state.floor}-й этаж` : ''));
       h('span', 'hm-scheme', crumbs, b.scheme);
       const fitBtn = h('button', 'hm-fit', crumbs, state.fit ? 'Крупнее' : 'Весь этаж на экране'); fitBtn.type = 'button';
-      fitBtn.onclick = () => { state.fit = !state.fit; render(); };
+      fitBtn.onclick = () => { state.fit = !state.fit; render(); centerSelected(); refocus('.hm-fit', crumbs); };
       const svg = el('svg', { class: 'hm-map', preserveAspectRatio: 'xMidYMin meet' }, svgWrap);
       const { W, list } = drawFloor(svg);
       svg.style.width = state.fit ? '100%' : Math.round(W) + 'px';
+      // крупный план на телефоне — окно с прокруткой в обе стороны, чтобы под ним была видна карточка
+      svgWrap.classList.toggle('pan', !state.fit && narrowOf(root));
       // легенда — только категории, которые есть на этом плане
       const present = new Set(list.map(cat));
       Object.entries(chips).forEach(([cls, chip]) => {
@@ -501,25 +536,58 @@
         if (chip.hidden && state.filter.delete(cls)) chip.setAttribute('aria-pressed', 'false');
       });
       aboutText(b, list);
-      const s = svg.querySelector('.hm-room.sel');
-      if (s && s.scrollIntoView) s.scrollIntoView({ block: 'nearest', inline: 'center' });
+    }
+
+    /* Выбранная аудитория — в середине окна плана (прокрутка внутри .hm-svg, страница не двигается). */
+    function centerSelected() {
+      const s = svgWrap.querySelector('.hm-room.sel');
+      if (!s) return null;
+      const w = svgWrap.getBoundingClientRect(), r = s.getBoundingClientRect();
+      svgWrap.scrollLeft += (r.left + r.width / 2) - (w.left + svgWrap.clientWidth / 2);
+      svgWrap.scrollTop += (r.top + r.height / 2) - (w.top + svgWrap.clientHeight / 2);
+      return s;
+    }
+
+    /* Аудитория и карточка вместе — в видимой части окна (между шапкой и нижним меню).
+       Если вместе не помещаются — аудитория по центру, карточка ниже. */
+    function reveal() {
+      const s = centerSelected();
+      if (!s) return;
+      const ins = insets();
+      const top = ins.top + 8, bottom = window.innerHeight - ins.bottom - 8;
+      const rr = s.getBoundingClientRect();
+      const cr = card.hidden ? rr : card.getBoundingClientRect();
+      const a = Math.min(rr.top, cr.top), b = Math.max(rr.bottom, cr.bottom);
+      let dy = 0;
+      if (b - a <= bottom - top) dy = b > bottom ? b - bottom : a < top ? a - top : 0;
+      else dy = (rr.top + rr.bottom) / 2 - (top + bottom) / 2;
+      if (Math.abs(dy) > 1) window.scrollBy(0, dy);
+    }
+
+    function closeCard() {
+      const r = state.selected;
+      state.selected = null; card.hidden = true;
+      if (useHash) history.replaceState(null, '', location.pathname + location.search);
+      render();
+      if (opts.onClear) opts.onClear();
+      // фокус — на ячейку закрытой аудитории (или на поиск, если её на плане нет)
+      const cell = r && Array.from(svgWrap.querySelectorAll('.hm-room')).find(g => g.getAttribute('data-number') === r.number);
+      if (cell) cell.focus({ preventScroll: true }); else search.focus({ preventScroll: true });
     }
 
     function showCard(r) {
       const b = B[r.building], c = cat(r);
       card.hidden = false;
       card.replaceChildren();
-      const close = h('button', 'hm-close', card, '×'); close.type = 'button';
+      const close = h('button', 'hm-close', card); close.type = 'button';
       close.setAttribute('aria-label', 'Закрыть');
-      close.onclick = () => {
-        state.selected = null; card.hidden = true;
-        if (useHash) history.replaceState(null, '', location.pathname + location.search);
-        render();
-        if (opts.onClear) opts.onClear();
-      };
+      const x = el('svg', { viewBox: '0 0 24 24', width: 22, height: 22, 'aria-hidden': 'true', focusable: 'false' }, close);
+      el('path', { d: 'M6 6l12 12M18 6L6 18' }, x);
+      close.onclick = closeCard;
       h('div', 'hm-card-type t-' + c, card,
         c === 'dean' ? 'Деканат' : c === 'chair' ? 'Кафедра' : r.purpose ? 'Служебное помещение' : r.type);
-      h('h3', null, card, r.purpose || `Аудитория ${r.number}`);
+      const title = h(hx(1), null, card, r.purpose || `Аудитория ${r.number}`);
+      title.id = uid + '-card-title'; title.tabIndex = -1;
       const dl = h('dl', null, card);
       const row = (k, v) => { if (v == null || v === '') return; h('dt', null, dl, k); h('dd', null, dl, v); };
       if (r.purpose) row('Кабинет', r.number);
@@ -530,21 +598,27 @@
       h('p', 'hm-route', card, routeOf(r));
     }
 
-    function select(r, silent) {
+    /* how: 'plan' — нажали на план (масштаб не меняем); 'list' — поиск и списки;
+       'link' — открыли по ссылке (фокус не переносим: страница только загрузилась). */
+    function select(r, how) {
       notice.hidden = true;
       state.selected = r;
       state.building = r.building;
       state.floor = r.floor;
       bSel.value = r.building;
+      // на телефоне вписанный по ширине план мелкий: номер не прочитать — открываем «Крупнее»
+      if (how !== 'plan' && narrowOf(root)) state.fit = false;
       showCard(r);
       render();
-      if (!silent && useHash) history.replaceState(null, '', '#room=' + encodeURIComponent(r.number));
+      if (useHash) history.replaceState(null, '', '#room=' + encodeURIComponent(r.number));
       if (opts.onSelect) opts.onSelect(r);
+      reveal();
+      if (how !== 'link') { const t = card.querySelector('#' + uid + '-card-title'); if (t) t.focus({ preventScroll: true }); }
     }
 
     function focus(q) {
       const r = byNumber[norm(q)] || rooms.find(x => x.purpose && norm(x.purpose).includes(norm(q)));
-      if (r) select(r);
+      if (r) select(r, 'link');
       else { notice.hidden = false; notice.textContent = `Аудитория «${q}» не найдена.`; }
       return r || null;
     }
@@ -556,18 +630,37 @@
       const found = rooms.filter(r => norm(r.number).startsWith(q) || (r.purpose && norm(r.purpose).includes(q))
         || norm(r.type).startsWith(q)).slice(0, 8);
       results.hidden = false;
-      if (!found.length) { h('li', 'hm-empty', results, 'Ничего не нашлось. В Главном корпусе номер из 4 цифр, во Втором — из 3.'); return; }
+      if (!found.length) {
+        h('li', 'hm-empty', results, 'Ничего не нашлось. В Главном корпусе номер из 4 цифр, во Втором — из 3.');
+        live.textContent = 'Ничего не нашлось';
+        return;
+      }
+      live.textContent = `Найдено: ${found.length}${found.length === 8 ? ' или больше' : ''}. Enter — открыть первое, стрелка вниз — к списку.`;
       found.forEach(r => {
         const b = h('button', null, h('li', null, results)); b.type = 'button';
         h('strong', null, b, r.number);
         h('span', null, b, ` ${r.purpose || r.type} · ${B[r.building].name}`);
-        b.onclick = () => { results.hidden = true; search.value = r.number; select(r); };
+        b.onclick = () => { results.hidden = true; live.textContent = ''; search.value = r.number; select(r, 'list'); };
       });
     };
     search.onkeydown = e => {
       if (e.key === 'Enter') { const f = results.querySelector('button'); if (f) f.click(); }
-      if (e.key === 'Escape') results.hidden = true;
+      if (e.key === 'ArrowDown' && !results.hidden) { const f = results.querySelector('button'); if (f) { e.preventDefault(); f.focus(); } }
+      if (e.key === 'Escape' && !results.hidden) { e.stopPropagation(); results.hidden = true; live.textContent = ''; }
     };
+    results.onkeydown = e => {
+      const list = Array.from(results.querySelectorAll('button')), i = list.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const next = e.key === 'ArrowDown' ? list[i + 1] : list[i - 1];
+        if (next) next.focus(); else if (e.key === 'ArrowUp') search.focus();
+      }
+      if (e.key === 'Escape') { e.stopPropagation(); results.hidden = true; live.textContent = ''; search.focus(); }
+    };
+    // Esc — закрыть карточку помещения
+    root.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && !card.hidden) { e.preventDefault(); closeCard(); }
+    });
     bSel.onchange = () => setView(bSel.value);
 
     const m = useHash ? location.hash.match(/room=([^&]+)/) : null;

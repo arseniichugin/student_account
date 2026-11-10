@@ -56,7 +56,7 @@ export function AppShell({
 
       <div className={cn("min-w-0 lg:pb-0", showBottomNav && "pb-20")}>
         {/* Шапка — телефон и планшет */}
-        <header className="sticky top-0 z-20 border-b border-border bg-bg/90 backdrop-blur lg:hidden">
+        <header data-shell-overlay="top" className="sticky top-0 z-20 border-b border-border bg-bg/90 backdrop-blur lg:hidden">
           <div className="mx-auto flex h-14 max-w-3xl items-center gap-3 px-4">
             <Link href={homeHref} aria-label="Хогвартс — на главную" className="inline-flex min-h-11 items-center">
               <Logo />
@@ -78,6 +78,7 @@ export function AppShell({
       {/* Нижняя навигация — телефон и планшет; из одного пункта она бесполезна */}
       {showBottomNav && (
         <nav
+          data-shell-overlay="bottom"
           className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
           aria-label="Основная навигация"
         >

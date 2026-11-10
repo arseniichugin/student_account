@@ -27,6 +27,8 @@ type HogwartsMapApi = {
       hash?: boolean;
       onSelect?: (room: CampusRoom) => void;
       onClear?: () => void;
+      headingLevel?: number;
+      insets?: () => { top: number; bottom: number };
     },
   ) => HogwartsMapInstance;
 };
@@ -106,8 +108,20 @@ const THEME_VARS = {
   "--hm-accent": "var(--primary)",
   "--hm-accent-2": "color-mix(in srgb, var(--primary) 75%, var(--surface))",
   "--hm-accent-3": "var(--primary-hover)",
+  // текст на акцентном фоне: в тёмной теме акцент светлый, белый на нём — 2.9:1, var(--on-primary) — 6.6:1
+  "--hm-on-accent": "var(--on-primary)",
   fontFamily: "inherit",
 } as React.CSSProperties;
+
+/** Сколько окна закрывают липкая шапка и нижнее меню кабинета (на компьютере их нет). */
+function shellInsets(): { top: number; bottom: number } {
+  const top = document.querySelector("[data-shell-overlay=top]")?.getBoundingClientRect();
+  const bottom = document.querySelector("[data-shell-overlay=bottom]")?.getBoundingClientRect();
+  return {
+    top: top && top.height > 0 ? Math.max(0, top.bottom) : 0,
+    bottom: bottom && bottom.height > 0 ? Math.max(0, window.innerHeight - bottom.top) : 0,
+  };
+}
 
 export type CampusMapViewProps = {
   /** Проверенные данные карты (lib/campus-map/load.ts). */
@@ -123,6 +137,8 @@ export function CampusMapView({ data, room = null }: CampusMapViewProps) {
   const roomRef = useRef(room);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [attempt, setAttempt] = useState(0);
+  // Номер монтирования карты: после каждого (первого, повторного, с новыми данными) открываем аудиторию из адреса.
+  const [mounted, setMounted] = useState(0);
 
   // Сообщение «не найдена» прячем, когда пользователь сам выбрал помещение на карте.
   const [noticeFor, setNoticeFor] = useState<string | null>(room);
@@ -154,6 +170,9 @@ export function CampusMapView({ data, room = null }: CampusMapViewProps) {
           instance = api.mount(el, {
             data: structuredClone(data),
             hash: false,
+            // над картой — h1 «Карта», значит план — h2, карточка помещения — h3
+            headingLevel: 2,
+            insets: shellInsets,
             onSelect: (r) => {
               selectedRef.current = r.number;
               setNoticeFor(null);
@@ -171,7 +190,7 @@ export function CampusMapView({ data, room = null }: CampusMapViewProps) {
         }
         mapRef.current = instance;
         setStatus("ready");
-        focusRoom(roomRef.current);
+        setMounted((n) => n + 1);
       })
       .catch((e) => {
         if (cancelled) return;
@@ -184,9 +203,14 @@ export function CampusMapView({ data, room = null }: CampusMapViewProps) {
       mapRef.current = null;
       selectedRef.current = null;
     };
-    // focusRoom читает только refs и data — отдельной зависимостью не нужна
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attempt, data]);
+
+  // Аудиторию из адреса открываем после того, как скелетон убран: иначе прокрутка к ней
+  // рассчитается по старой раскладке и аудитория уедет из окна.
+  useEffect(() => {
+    if (mounted > 0) focusRoom(roomRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted]);
 
   // 3. Адрес поменялся без перемонтирования (переход по ссылке /map?room=… с этой же страницы).
   useEffect(() => {
