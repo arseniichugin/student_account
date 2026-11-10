@@ -3,14 +3,14 @@ import { ChangePasswordForm } from "@/components/change-password-form";
 import { Card, CardTitle } from "@/components/ui/card";
 import { DetailsList } from "@/components/ui/details-list";
 import { requireStudent } from "@/lib/auth/guards";
-import { isDemoMode } from "@/lib/config";
+import { PASSWORD_CHANGE_LOCK_MESSAGE, getPasswordChangeLock } from "@/lib/data/account";
 import { getMyStudentProfile } from "@/lib/data/profile";
 
 export const metadata: Metadata = { title: "Профиль" };
 
 export default async function ProfilePage() {
   const ctx = await requireStudent();
-  const p = await getMyStudentProfile(ctx);
+  const [p, passwordLock] = await Promise.all([getMyStudentProfile(ctx), getPasswordChangeLock(ctx.userId)]);
   const fullName = [p.lastName, p.firstName, p.middleName].filter(Boolean).join(" ");
 
   return (
@@ -49,10 +49,10 @@ export default async function ProfilePage() {
 
         <Card className="self-start">
           <CardTitle>Смена пароля</CardTitle>
-          {isDemoMode() ? (
+          {/* Демо-режим стенда или тестовый аккаунт (isDemo): форма скрыта, действие отклоняется на сервере */}
+          {passwordLock ? (
             <p className="mt-2 text-sm text-muted">
-              В демо-версии смена пароля отключена: тестовыми аккаунтами пользуются все посетители,
-              в том числе жюри. В настоящем кабинете здесь будет форма смены пароля.
+              {PASSWORD_CHANGE_LOCK_MESSAGE[passwordLock]} В настоящем кабинете здесь будет форма смены пароля.
             </p>
           ) : (
             <div className="mt-3">
