@@ -53,7 +53,7 @@ Next.js 16 (App Router) + TypeScript · React 19 · Tailwind CSS 4 · PostgreSQL
 
 1. **Только вымышленные данные.** Никаких реальных ФИО, оценок, номеров зачёток, логинов.
    Не подключаться к настоящим системам вуза. Парсинг открытых данных (расписание) — можно.
-2. **Студент видит только свои данные.** Любой запрос к данным студента фильтруется
+2. **Студент видит только свои данные; преподаватель — только свои группы** (по `TeachingAssignment`). Любой запрос к данным студента фильтруется
    по `studentId` из сессии, а не по параметру из URL или тела запроса:
    ```ts
    // ❌ id из адреса без проверки владельца
@@ -98,15 +98,21 @@ Next.js 16 (App Router) + TypeScript · React 19 · Tailwind CSS 4 · PostgreSQL
 app/(auth)/login/        вход
 app/(app)/               кабинет: layout (requireUser) рисует оболочку и меню по роли; error.tsx — «Повторить»
 app/(app)/(student)/     страницы студента: today, requests, profile (layout + КАЖДАЯ страница — requireStudent)
+app/(app)/(student)/grades/  оценки студента текущего семестра (requireStudent, getMyGrades)
 app/(app)/(staff)/staff/ кабинет сотрудника деканата (requireStaff)
-app/(app)/schedule/      расписание группы/преподавателя — обе роли (requireUser)
-app/(app)/map/           карта кампуса — обе роли (requireUser)
+app/(app)/(teacher)/     кабинет преподавателя (layout + КАЖДАЯ страница — requireTeacher): journal, journal/[assignmentId]
+                         (чужой id → 404), journal/actions.ts (saveGradesAction), teacher/profile
+app/(app)/schedule/      расписание группы/преподавателя — все роли (requireUser); преподавателю по умолчанию — своё
+app/(app)/map/           карта кампуса — все роли (requireUser)
 app/api/schedule/search/ подсказки поиска (getUserContext → 401 без сессии; студентов не возвращает)
 lib/navigation.ts        меню для каждой роли — ЕДИНСТВЕННОЕ место, где перечислены разделы
 lib/auth/                сессии, пароли, ограничение попыток, guards, серверные действия входа
 lib/data/                ЕДИНСТВЕННОЕ место запросов к базе из страниц; всё фильтруется по контексту
 lib/data/schedule.ts     расписание: личное (StudentContext), группы/преподавателя и поиск (UserContext)
 lib/data/schedule-moves.ts  заглушки «Перенесено на …» (те же myGroupIds/checkRange из schedule.ts)
+lib/data/grades.ts       оценки: getMyGrades (StudentContext), getMyAssignments / getJournal / saveGrades (TeacherContext)
+lib/grades/              чистые функции: scale.ts (шкала ECTS, средние, цвета букв), term.ts (семестр, срезы),
+                         notification.ts (текст уведомления «Новая оценка»)
 lib/validation/          схемы Zod
 lib/university-data/     разбор и проверка файлов вуза, импорт в базу (без server-only — нужен скрипту)
 lib/moscow-time.ts       даты «YYYY-MM-DD» и время по Москве
@@ -128,7 +134,9 @@ tests/                   автотесты безопасности, импор
 ```
 
 Новые запросы к данным — **только** в `lib/data/*`, функция принимает `StudentContext`,
-`StaffContext` или `UserContext` (любой вошедший, `requireUser()`) из `lib/auth/guards.ts`, а не голый id.
+`StaffContext`, `TeacherContext` или `UserContext` (любой вошедший, `requireUser()`) из `lib/auth/guards.ts`, а не голый id.
+Роли: `STUDENT`, `STAFF`, `TEACHER` (преподаватель из `schedule.csv`, аккаунт создаёт импорт; оценки ставит только
+по своим назначениям `TeachingAssignment` — семинары и практические занятия группы).
 Не хардкодь названия факультетов, групп и дисциплин — бери их из базы.
 
 ## Команды
@@ -146,9 +154,10 @@ tests/                   автотесты безопасности, импор
 | `npm run build` | Продакшен-сборка |
 
 Тестовые аккаунты (основной набор данных), пароль `Hogwarts2026` (`DEMO_PASSWORD`):
-студенты `larisa.sharova26` (Гриффиндор, 1 курс), `eva.orlova25` (Слизерин, 2 курс, есть долг),
-`yaroslav.shestakov24` (Когтевран, 3 курс); деканаты `dekanat.gr`, `dekanat.sl`, `dekanat.kg`, `dekanat.pf`.
-Пароли остальных студентов — в `credentials.csv` (создаёт импорт).
+студенты `larisa.sharova26` (Гриффиндор, 1 курс), `eva.orlova25` (Слизерин, 2 курс, FX за 1-й срез),
+`yaroslav.shestakov24` (Когтевран, 3 курс); преподаватели `y.yudin` (экзамен, группа Ларисы без 2-го среза),
+`s.semenov` (зачёт, группа Евы); деканаты `dekanat.gr`, `dekanat.sl`, `dekanat.kg`, `dekanat.pf`.
+Пароли остальных студентов и преподавателей — в `credentials.csv` (создаёт импорт).
 
 ## Проверка в браузере
 

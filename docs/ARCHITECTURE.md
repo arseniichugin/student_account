@@ -1,7 +1,8 @@
 # Архитектура
 
 > Статус: **реализовано на этапе 2** (вход, сессии, разграничение доступа, заявки).
-> Этап 3: данные вуза из заменяемых файлов (`data/university/`), импорт, слой данных расписания.
+> Этап 3: данные вуза из заменяемых файлов (`data/university/`), импорт, слой данных расписания;
+> успеваемость — роль преподавателя, назначения, оценки по срезам (`docs/specs/grades.md`).
 
 ## 1. Общая схема
 
@@ -14,8 +15,8 @@ proxy.ts — «оптимистичная» проверка: нет cookie → 
       ▼
 Next.js 16 (App Router)
   ├─ страницы и компоненты (React 19, Tailwind)
-  ├─ каждая страница: requireStudent() / requireStaff(); общие разделы (расписание, карта) — requireUser()
-  ├─ серверные действия (Server Actions) ← каждое само вызывает requireStudent() / requireStaff()
+  ├─ каждая страница: requireStudent() / requireStaff() / requireTeacher(); общие разделы (расписание, карта) — requireUser()
+  ├─ серверные действия (Server Actions) ← каждое само вызывает requireStudent() / requireStaff() / requireTeacher()
   ├─ API (app/api/*) ← getUserContext(): без сессии — 401, а не редирект
   └─ слой доступа к данным (lib/data/*) ← принимает контекст из сессии, всегда фильтр по владельцу
       │
@@ -60,7 +61,7 @@ PostgreSQL (через Prisma)
 Полная схема — `prisma/schema.prisma`. Кратко:
 
 ```
-User            id, login, passwordHash, role (STUDENT | STAFF), isDemo, createdAt
+User            id, login, passwordHash, role (STUDENT | STAFF | TEACHER), isDemo, createdAt
 Session         id, tokenHash (SHA-256 токена), userId, expiresAt, createdAt
 LoginAttempt    id, login, ip, success, createdAt   — для ограничения попыток
 
@@ -75,7 +76,10 @@ StudentGroup    studentId, groupId, position (1/2) — языковые груп
 Staff           id, userId, facultyId, fullName, position — по одному на факультет
 
 ── из schedule.csv и campus-map.json (расписание заменяется целиком) ──
-Teacher         id, oid (lecturerOid), shortName, fullName, rank?, email?
+Teacher         id, oid (lecturerOid), shortName, fullName, rank?, email?, userId? (1:1 User с ролью TEACHER)
+TeachingAssignment  id, teacherId, disciplineId, groupId, finalKind? (EXAM | CREDIT), finalDate?
+                — кто ставит оценки; заполняет импорт: «Семинар»/«Практическое занятие» группы без REPLACED;
+                  уникально (teacherId, disciplineId, groupId); id сохраняются при повторном импорте
 Building        id, key (id на карте), name, abbr?, address?, floors, wings?, maxRoom?, scheme?, onMap
 Room            id, number («4144», «Манеж-1»), buildingId?, type?, capacity?, floor?, wing?, purpose?,
                 bookable, onMap
@@ -87,7 +91,11 @@ LessonGroup     lessonId, groupId, date — лекция потока = одно
                 индексы: LessonGroup(groupId, date), Lesson(teacherId, date)
 
 ── демо-контент (prisma/seed.ts) и действия пользователей ──
-Grade           id, studentId, disciplineId, semester, kind (EXAM | CREDIT | COURSEWORK | MIDTERM), value?, date?
+Grade           id, studentId, disciplineId, semester (семестр студента), kind (CHECKPOINT | EXAM | CREDIT),
+                checkpoint (1–3 у среза, 0 у экзамена/зачёта), points? (0–100), passed? (зачёт),
+                gradedByTeacherId? (SetNull), createdAt, updatedAt
+                — уникально (studentId, disciplineId, semester, kind, checkpoint); CHECK в базе: баллы 0–100,
+                  форма записи соответствует виду
 Deadline        id, groupId, disciplineId?, title, dueAt
 RequestType     id, code, name, description, etaDays
 Request         id, studentId, typeId, payload (JSON),
@@ -128,7 +136,21 @@ campus-map.json┘     карта — ТОЙ ЖЕ схемой, что и стр
 - `npm run db:seed` добавляет демо-контент поверх импорта и берёт факультеты, группы и дисциплины
   из базы — работает с любыми заменёнными файлами.
 
-### 3.2 Слой данных расписания (`lib/data/schedule.ts`)
+### 3.2 Успеваемость (`lib/data/grades.ts`, `lib/grades/`)
+
+- Шкала ECTS, средние, цвета букв — `lib/grades/scale.ts`; текущий семестр (осень 2026/27, номер по курсу
+  `2 × (курс − 1) + 1`) и сроки срезов — `lib/grades/term.ts`. Оба модуля без серверного кода.
+- Студент: `getMyGrades(ctx, semester?)` — только `ctx.studentId`; дисциплины — всё, что есть в расписании его
+  групп; итоговый контроль и преподаватели семинаров — из `TeachingAssignment`; прошлые семестры — пусто.
+- Преподаватель: `getMyAssignments(ctx)`, `getJournal(ctx, assignmentId)` — только назначения `ctx.teacherId`
+  (чужое → null → 404). Студенты группы: академическая — `Student.academicGroupId`, языковая — `StudentGroup`.
+- `saveGrades(ctx, input)` (действие `saveGradesAction`): Zod → своё назначение → каждый студент в группе
+  назначения → экзамен/зачёт совпадает с `finalKind`; любая ошибка — ничего не сохраняется. Изменённая
+  оценка → уведомление `GRADE` студенту. Демо-режим ставить оценки не мешает.
+- Demo: seed ставит 1-й срез всем и 2-й — примерно половине пар; тестовые преподаватели (`isDemo`) выбираются
+  импортом из семинаристов групп тестовых студентов (`TEST_TEACHER_LOGINS` — явно).
+
+### 3.3 Слой данных расписания (`lib/data/schedule.ts`)
 
 - Личное расписание — `getMyScheduleForDate(ctx, date?)`, `getMyScheduleForRange(ctx, from, to)`:
   группы студента (академическая + языковые) берутся **по `ctx.studentId` из сессии**; занятия
@@ -161,15 +183,17 @@ campus-map.json┘     карта — ТОЙ ЖЕ схемой, что и стр
   где прокси подменяет заголовок `Origin` на `localhost:3000`). На боевом сервере переменная не задаётся.
 
 ### 4.2 Разграничение доступа (`lib/auth/guards.ts`, `lib/data/`)
-- Роль проверяется на сервере для каждой страницы и действия (`requireStudent()`, `requireStaff()`).
-  Они возвращают **контекст** (`StudentContext` / `StaffContext`) — брендированный тип,
+- Роль проверяется на сервере для каждой страницы и действия (`requireStudent()`, `requireStaff()`, `requireTeacher()`).
+  Они возвращают **контекст** (`StudentContext` / `StaffContext` / `TeacherContext`) — брендированный тип,
   который нельзя случайно собрать вручную из id в адресе.
-- Общие для обеих ролей разделы (расписание группы/преподавателя, карта) — `requireUser()` → `UserContext`
+- Общие для всех ролей разделы (расписание группы/преподавателя, карта) — `requireUser()` → `UserContext`
   (любой вошедший). Обработчики `app/api/*` вызывают `getUserContext()`: без сессии — ответ 401, а не редирект.
   Поиск расписания (`/api/schedule/search`) возвращает только группы и преподавателей, без студентов.
 - **Студент:** все запросы к данным идут через функции из `lib/data/*`, которые принимают
   контекст и фильтруют по `studentId`. Id из адреса используется только вместе с фильтром владельца.
-- Студент, открывший `/staff`, перенаправляется в свой кабинет; сотрудник на страницах студента — в свой.
+- Пользователь на странице чужой роли перенаправляется в свой кабинет (`HOME[role]`: `/today`, `/staff`, `/journal`).
+- **Преподаватель:** видит студентов и оценки только групп из своих назначений (`TeachingAssignment`);
+  сохранение проверяется на сервере (назначение, членство студента, вид итоговой оценки, баллы — целое 0–100).
 - Если объект не принадлежит пользователю — ответ «Не найдено» (404), а не «Нет доступа»,
   чтобы не подтверждать существование чужой записи.
 - **Сотрудник:** видит заявки и публикует объявления только в рамках своего факультета.
@@ -202,19 +226,21 @@ campus-map.json┘     карта — ТОЙ ЖЕ схемой, что и стр
 - Поиск расписания экранирует `%`, `_` и `\` (Prisma передаёт `contains` в ILIKE как есть).
 
 ### 4.5 Проверка
-Автотесты (`npm test`, Vitest) — 124 теста в 10 файлах (замер 10 ноября):
+Автотесты (`npm test`, Vitest) — 155 тестов в 12 файлах (замер 10 ноября, после успеваемости):
 
 | Файл | Тестов | Что проверяет |
 |---|---|---|
+| `tests/grades-security.test.ts` | 13 | Чужая группа и мусорный id → «не найдено»; студент не из группы, экзамен вместо зачёта, баллы 101 / −1 / дробные — отказ без сохранения; преподаватель без назначений не видит групп; оценка уведомляет студента; студент видит только свои оценки |
+| `tests/grades-scale.test.ts` | 12 | Границы букв ECTS, средние, токены цвета в обеих темах, номер семестра и сроки срезов |
 | `tests/security.test.ts` | 16 | Чужая заявка не открывается, сотрудник не видит и не меняет заявки чужого факультета, пароли — только хеши argon2id, блокировка после 5 ошибок входа, ошибки с одного адреса не блокируют аккаунт для других, лимит на подачу заявок |
 | `tests/password-change.test.ts` | 4 | Смена пароля тестовых аккаунтов (`isDemo`) и в `DEMO_MODE` отклоняется на сервере; обычный студент меняет |
-| `tests/university-data.test.ts` | 24 | Сломанные файлы вуза дают понятные ошибки и не меняют базу; `credentials.csv` без формул |
-| `tests/university-import.test.ts` | 3 | Повторный импорт идемпотентен, не меняет пароли; бывший тестовый студент получает новый пароль |
+| `tests/university-data.test.ts` | 28 | Сломанные файлы вуза дают понятные ошибки и не меняют базу; `credentials.csv` без формул; назначения преподавателей и их логины (конфликт со студентом/деканатом — ошибка) |
+| `tests/university-import.test.ts` | 4 | Повторный импорт идемпотентен, не меняет пароли и назначения; бывший тестовый студент получает новый пароль; аккаунты преподавателей, смена почты — новый логин, тот же пароль |
 | `tests/campus-map.test.ts` | 24 | Схема карты; файл, принятый импортом, принимает и `/map`; данные карты не вставляются как HTML |
 | `tests/schedule.test.ts` | 10 | Личное расписание совпадает с подсчётом по CSV, без чужих языковых групп; поиск без студентов; проходит и на другом наборе (`--seed 7`) |
 | `tests/schedule-search-api.test.ts` | 8 | `/api/schedule/search`: 401 без сессии и с поддельным токеном, без кеша, без студентов, только нужные поля |
 | `tests/schedule-moves.test.ts` | 14 | Разбор причины переноса «Перенесено с 03.11 (1 пара)» |
-| `tests/schedule-ui.test.ts` | 19 | Чистые функции экранов расписания (даты, подписи, адреса) и меню по ролям |
+| `tests/schedule-ui.test.ts` | 20 | Чистые функции экранов расписания (даты, подписи, адреса), меню по ролям, разделы меню в matcher `proxy.ts` |
 | `tests/safe-url.test.ts` | 2 | В ссылку на онлайн-занятие попадает только `http(s)://` |
 
 - Аудит субагентом `security-reviewer` (8 ноября): утечек чужих данных и обхода ролей не найдено;
@@ -235,15 +261,19 @@ app/
   (auth)/login/          страница входа
   (app)/                 кабинет: общая оболочка, меню по роли (lib/navigation.ts), error.tsx
     (student)/           студент: today («Мой день»), requests, profile (+ loading.tsx у каждого раздела)
+    (student)/grades/    студент: оценки текущего семестра
     (staff)/staff/       сотрудник: заявки факультета
-    schedule/            расписание группы / преподавателя — обе роли
-    map/                 карта кампуса — обе роли
+    (teacher)/           преподаватель: journal, journal/[assignmentId], journal/actions.ts, teacher/profile
+    schedule/            расписание группы / преподавателя — все роли (преподавателю по умолчанию — своё)
+    map/                 карта кампуса — все роли
   api/schedule/search/   подсказки поиска (getUserContext → 401 без сессии)
 lib/
-  auth/                  сессии, хеширование, ограничение попыток, requireStudent / requireStaff / requireUser,
+  auth/                  сессии, хеширование, ограничение попыток, requireStudent / requireStaff / requireTeacher / requireUser,
                          getUserContext (для API)
   data/                  доступ к данным с проверкой владельца: schedule.ts — расписание,
-                         schedule-moves.ts — заглушки «Перенесено на …», requests, profile, account
+                         schedule-moves.ts — заглушки «Перенесено на …», grades.ts — оценки и журнал,
+                         requests, profile, account
+  grades/                шкала ECTS (scale.ts), учебный период и срезы (term.ts), текст уведомления об оценке
   university-data/       разбор, проверка и импорт файлов вуза; universityDataDir() — папка данных
   campus-map/            схема campus-map.json (одна для карты и импорта), чтение файла, поиск аудитории
   schedule/              чистые функции экранов расписания (даты, подписи, адреса, переносы)
