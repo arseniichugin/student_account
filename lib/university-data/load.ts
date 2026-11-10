@@ -15,10 +15,12 @@ export const DEFAULT_DATA_DIR = "data/university";
 
 /**
  * Папка с заменяемыми файлами вуза — одна для импорта, тестов и страницы карты:
- * env UNIVERSITY_DATA_DIR или <текущая папка (корень проекта)>/data/university.
+ * env UNIVERSITY_DATA_DIR или <текущая папка (корень проекта)>/data/university (= DEFAULT_DATA_DIR).
+ * Части пути — литералами и без path.resolve: так сборщик Next.js (Turbopack) видит, что сервер
+ * читает только data/university, и не тащит в сборку весь проект.
  */
 export function universityDataDir(): string {
-  return path.resolve(process.env.UNIVERSITY_DATA_DIR || path.join(process.cwd(), DEFAULT_DATA_DIR));
+  return process.env.UNIVERSITY_DATA_DIR || path.join(process.cwd(), "data", "university");
 }
 
 /**
