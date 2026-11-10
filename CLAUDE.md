@@ -102,14 +102,17 @@ app/(app)/               кабинет: layout (requireUser) рисует об�
 app/(app)/(student)/     страницы студента: today, requests, profile (layout + КАЖДАЯ страница — requireStudent)
 app/(app)/(student)/grades/  оценки студента текущего семестра (requireStudent, getMyGrades)
 app/(app)/(staff)/staff/ кабинет сотрудника деканата (requireStaff)
-app/(app)/(teacher)/     кабинет преподавателя (layout + КАЖДАЯ страница — requireTeacher): journal, journal/[assignmentId]
-                         (layout сегмента проверяет принадлежность до loading → чужой id — настоящий HTTP 404; страница — ещё раз),
+app/(app)/(teacher)/     кабинет преподавателя (layout + КАЖДАЯ страница — requireTeacher): journal/(list) — список групп,
+                         journal/[assignmentId] — журнал (layout сегмента проверяет принадлежность до loading → чужой id —
+                         настоящий HTTP 404; страница — ещё раз; список вынесен в группу (list), чтобы его loading.tsx
+                         не оборачивал журнал). Так же устроены requests/(list) и requests/[id]/layout.tsx у студента;
                          journal/actions.ts (saveGradesAction: лимит частоты, Zod, проверка назначения), teacher/profile
 app/(app)/schedule/      расписание группы/преподавателя — все роли (requireUser); преподавателю по умолчанию — своё
 app/(app)/map/           карта кампуса — все роли (requireUser)
 app/api/schedule/search/ подсказки поиска (getUserContext → 401 без сессии; студентов не возвращает)
 lib/navigation.ts        меню для каждой роли — ЕДИНСТВЕННОЕ место, где перечислены разделы
-lib/auth/                сессии, пароли, ограничение попыток, guards, серверные действия входа
+lib/auth/                сессии, пароли, ограничение попыток, guards, серверные действия входа;
+                         action-limit.ts — лимит частоты серверных действий (в памяти процесса)
 lib/data/                ЕДИНСТВЕННОЕ место запросов к базе из страниц; всё фильтруется по контексту
 lib/data/schedule.ts     расписание: личное (StudentContext), группы/преподавателя и поиск (UserContext)
 lib/data/schedule-moves.ts  заглушки «Перенесено на …» (те же myGroupIds/checkRange из schedule.ts)
