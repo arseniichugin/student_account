@@ -1123,27 +1123,39 @@ export function pickTestStudents(data: Pick<UniversityDataset, "faculties" | "st
 }
 
 /**
- * Тестовые преподаватели для жюри: для каждого тестового студента по порядку — семинарист его групп
- * (академической и языковых) с аккаунтом; из кандидатов — с наибольшим числом групп, затем по oid.
- * Один человек дважды не выбирается. Детерминированно.
+ * Тестовые преподаватели для жюри: для i-го тестового студента — семинарист его групп с аккаунтом.
+ * Чтобы жюри увидело оба вида итогового контроля, первому ищем пару с экзаменом, второму — с зачётом.
+ * Порядок выбора: нужный вид контроля → академическая группа студента (полный журнал, а не языковая
+ * подгруппа на 5–9 человек) → больше групп у преподавателя → меньший oid. Один человек дважды не выбирается.
  */
 export function pickTestTeachers(
   data: Pick<UniversityDataset, "teachers" | "assignments">,
   testStudents: Pick<StudentData, "academicGroup" | "languageGroups">[],
   count = 2,
 ): TeacherData[] {
+  const PREFERRED: FinalKindValue[] = ["EXAM", "CREDIT"];
   const byOid = new Map(data.teachers.map((t) => [t.oid, t]));
   const load = new Map<string, number>();
   for (const a of data.assignments) load.set(a.teacherOid, (load.get(a.teacherOid) ?? 0) + 1);
   const picked: TeacherData[] = [];
   for (const s of testStudents) {
     if (picked.length >= count) break;
+    const prefer = PREFERRED[picked.length % PREFERRED.length];
     const groups = new Set([s.academicGroup, ...s.languageGroups]);
-    const candidates = [...new Set(data.assignments.filter((a) => groups.has(a.group)).map((a) => a.teacherOid))]
-      .map((oid) => byOid.get(oid))
-      .filter((t): t is TeacherData => !!t?.login && !picked.includes(t))
-      .sort((a, b) => load.get(b.oid)! - load.get(a.oid)! || compareIds(a.oid, b.oid));
-    if (candidates[0]) picked.push(candidates[0]);
+    const best = data.assignments
+      .filter((a) => groups.has(a.group))
+      .filter((a) => {
+        const t = byOid.get(a.teacherOid);
+        return !!t?.login && !picked.includes(t);
+      })
+      .sort(
+        (a, b) =>
+          Number(b.finalKind === prefer) - Number(a.finalKind === prefer) ||
+          Number(b.group === s.academicGroup) - Number(a.group === s.academicGroup) ||
+          load.get(b.teacherOid)! - load.get(a.teacherOid)! ||
+          compareIds(a.teacherOid, b.teacherOid),
+      )[0];
+    if (best) picked.push(byOid.get(best.teacherOid)!);
   }
   return picked;
 }

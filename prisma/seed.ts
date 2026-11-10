@@ -197,9 +197,13 @@ async function main() {
   const keepSecondEmpty = (p: { groupId: string; teacherIds: string[] }) =>
     !!testTeacher1 && p.teacherIds.includes(testTeacher1) && t1Groups.has(p.groupId);
 
-  // «Долг» тестового студента 2: FX за 1-й срез по первой по алфавиту дисциплине
+  // «Долг» тестового студента 2: FX за 1-й срез — по дисциплине тестового преподавателя 2, если он его ведёт
+  // (жюри может само «принять пересдачу»), иначе по первой по алфавиту дисциплине
   const t2Pairs = t2 ? [...pairs.values()].filter((p) => groupsOf(t2).has(p.groupId)) : [];
-  const debtPair = t2Pairs.sort((a, b) => disciplines.get(a.disciplineId)!.localeCompare(disciplines.get(b.disciplineId)!, "ru"))[0];
+  const demoTeacherIds = new Set(assignments.filter((a) => a.teacher.user?.isDemo).map((a) => a.teacherId));
+  const debtPair =
+    t2Pairs.find((p) => p.teacherIds.some((id) => demoTeacherIds.has(id) && id !== testTeacher1)) ??
+    t2Pairs.sort((a, b) => disciplines.get(a.disciplineId)!.localeCompare(disciplines.get(b.disciplineId)!, "ru"))[0];
   const debtSubject = debtPair ? disciplines.get(debtPair.disciplineId)! : null;
   const debtPoints = 45 + (t2 ? hash(`debt:${t2.externalId}`) % 12 : 0); // 45–56 — FX
 
