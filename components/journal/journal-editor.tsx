@@ -784,7 +784,7 @@ export function JournalEditor({ journal }: { journal: Journal }) {
               "Сохраняем…"
             ) : dirtyCount > 0 ? (
               <>
-                <span className="block font-medium text-warning">Не сохранено: {dirtyCount}</span>
+                <span className="block font-medium whitespace-nowrap text-warning">Не сохранено: {dirtyCount}</span>
                 {clientInvalid.length > 0 && <span className="block text-xs text-danger">С ошибкой: {clientInvalid.length}</span>}
               </>
             ) : (
@@ -799,7 +799,8 @@ export function JournalEditor({ journal }: { journal: Journal }) {
           )}
           <Button ref={saveRef} type="submit" disabled={pending || dirtyCount === 0}>
             {pending && <Loader2 className="size-4 animate-spin" aria-hidden />}
-            {pending ? "Сохраняем…" : dirtyCount > 0 ? `Сохранить (${dirtyCount})` : "Сохранить"}
+            {pending ? "Сохраняем…" : "Сохранить"}
+            {!pending && dirtyCount > 0 && <span className="max-sm:hidden">({dirtyCount})</span>}
           </Button>
         </div>
       </div>
