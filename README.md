@@ -78,7 +78,7 @@
 
 > Раздел будет пополняться по мере работы над проектом.
 
-- [ ] Кабинет сотрудника деканата (обработка заявок, публикация объявлений)
+- [ ] Кабинет сотрудника деканата: обработка заявок — ✅ готово; публикация объявлений — впереди
 - [ ] ИИ-помощник, отвечающий на частые вопросы студентов
 - [ ] Тёмная тема
 - [ ] Установка на телефон как приложение (PWA)
@@ -229,6 +229,7 @@ npm run dev
 | `npm run data:import` | Проверить и загрузить файлы вуза из `data/university` (`-- --check` — только проверить) |
 | `npm run db:seed` | Пересоздать демо-контент: заявки, оценки, объявления, уведомления |
 | `npm run db:migrate` | Применить изменения схемы базы (при разработке) |
+| `npm run db:reset` | Пересоздать базу с нуля: миграции + импорт данных вуза + демо-контент (все данные удаляются) |
 
 ### Запуск целиком в Docker (как на сервере)
 
@@ -315,9 +316,9 @@ docker compose up -d app
 | Материал | Для чего | Лицензия |
 |---|---|---|
 | [Next.js](https://github.com/vercel/next.js), [React](https://github.com/facebook/react) | Фреймворк | MIT |
-| [Prisma](https://github.com/prisma/prisma) | Работа с базой данных | Apache-2.0 |
+| [Prisma](https://github.com/prisma/prisma) (`prisma`, `@prisma/client`, `@prisma/adapter-pg`) | Работа с базой данных | Apache-2.0 |
 | [PostgreSQL](https://www.postgresql.org/about/licence/) | База данных | PostgreSQL License |
-| [Tailwind CSS](https://github.com/tailwindlabs/tailwindcss) | Стили | MIT |
+| [Tailwind CSS](https://github.com/tailwindlabs/tailwindcss) (`tailwindcss`, `@tailwindcss/turbopack`) | Стили | MIT |
 | [shadcn/ui](https://github.com/shadcn-ui/ui) | Образец для компонентов (код адаптирован) | MIT |
 | [class-variance-authority](https://github.com/joe-bell/cva), [clsx](https://github.com/lukeed/clsx), [tailwind-merge](https://github.com/dcastil/tailwind-merge) | Утилиты для стилей | Apache-2.0 / MIT / MIT |
 | [Lucide](https://github.com/lucide-icons/lucide) | Иконки | ISC |
@@ -326,3 +327,9 @@ docker compose up -d app
 | [Zod](https://github.com/colinhacks/zod) | Проверка данных | MIT |
 | [node-postgres](https://github.com/brianc/node-postgres) | Драйвер PostgreSQL | MIT |
 | [Vitest](https://github.com/vitest-dev/vitest) | Тесты | MIT |
+| [dotenv](https://github.com/motdotla/dotenv) | Чтение `.env` в скриптах импорта и seed | BSD-2-Clause |
+| [server-only](https://www.npmjs.com/package/server-only) | Запрет импорта серверного кода в браузер | MIT |
+| [tsx](https://github.com/privatenumber/tsx) | Запуск TypeScript-скриптов (импорт данных, seed) | MIT |
+| [TypeScript](https://github.com/microsoft/TypeScript) | Язык и проверка типов | Apache-2.0 |
+| [ESLint](https://github.com/eslint/eslint), [eslint-config-next](https://github.com/vercel/next.js) | Проверка кода | MIT |
+| [DefinitelyTyped](https://github.com/DefinitelyTyped/DefinitelyTyped) (`@types/node`, `@types/pg`, `@types/react`, `@types/react-dom`) | Типы для TypeScript | MIT |

@@ -14,8 +14,9 @@ proxy.ts — «оптимистичная» проверка: нет cookie → 
       ▼
 Next.js 16 (App Router)
   ├─ страницы и компоненты (React 19, Tailwind)
-  ├─ layout разделов: requireStudent() / requireStaff()
+  ├─ каждая страница: requireStudent() / requireStaff(); общие разделы (расписание, карта) — requireUser()
   ├─ серверные действия (Server Actions) ← каждое само вызывает requireStudent() / requireStaff()
+  ├─ API (app/api/*) ← getUserContext(): без сессии — 401, а не редирект
   └─ слой доступа к данным (lib/data/*) ← принимает контекст из сессии, всегда фильтр по владельцу
       │
       ▼
@@ -60,7 +61,7 @@ PostgreSQL (через Prisma)
 
 ```
 User            id, login, passwordHash, role (STUDENT | STAFF), isDemo, createdAt
-Session         id, userId, expiresAt                — хранится хеш токена
+Session         id, tokenHash (SHA-256 токена), userId, expiresAt, createdAt
 LoginAttempt    id, login, ip, success, createdAt   — для ограничения попыток
 
 ── из students.csv ──
@@ -75,12 +76,13 @@ Staff           id, userId, facultyId, fullName, position — по одному 
 
 ── из schedule.csv и campus-map.json (расписание заменяется целиком) ──
 Teacher         id, oid (lecturerOid), shortName, fullName, rank?, email?
-Building        id, key (id на карте), name, abbr?, address?, floors, onMap
-Room            id, number («4144», «Манеж-1»), buildingId?, type?, capacity?, floor?, purpose?, bookable, onMap
+Building        id, key (id на карте), name, abbr?, address?, floors, wings?, maxRoom?, scheme?, onMap
+Room            id, number («4144», «Манеж-1»), buildingId?, type?, capacity?, floor?, wing?, purpose?,
+                bookable, onMap
 Discipline      id, name, oid?
-Lesson          id, oid (lessonOid), date, startTime, endTime («HH:MM» по Москве), startsAt, endsAt (UTC),
+Lesson          id, oid (lessonOid), date, startTime, endTime («HH:MM» по Москве), startsAt, endsAt (UTC, задел),
                 pairStart?, pairEnd?, disciplineId, kind («Лекция»…), teacherId?, roomId?, buildingId?,
-                stream?, subGroup?, note?, url?, status (NORMAL | MOVED | CANCELLED | REPLACED)
+                stream?, subGroup?, note?, url?, urlDescription?, status (NORMAL | MOVED | CANCELLED | REPLACED)
 LessonGroup     lessonId, groupId, date — лекция потока = одно занятие + несколько групп
                 индексы: LessonGroup(groupId, date), Lesson(teacherId, date)
 
@@ -95,6 +97,12 @@ Announcement    id, authorId, title, body, facultyId? / course? / groupId? (ау
 Notification    id, userId, type, title, body, link?, readAt?, createdAt
 ```
 
+- **Карта кампуса** (`/map`) читает `campus-map.json` напрямую (`lib/campus-map/load.ts`) при каждом запросе —
+  файл можно заменить без пересборки. Поля карты в `Building`/`Room` (этажи, крылья, вместимость, тип) —
+  копия для будущего API и проверок; расписание берёт из базы только номер, этаж, название и адрес корпуса.
+- **`Lesson.startsAt/endsAt`** — задел: импорт их заполняет, но сейчас никто не читает; время пары
+  считается из `date` + `startTime`/`endTime` (`lib/moscow-time.ts`).
+
 ### 3.1 Импорт данных вуза (`npm run data:import`)
 
 Код — `lib/university-data/` (тестируется без базы), команда — `scripts/import-university-data.ts`,
@@ -103,7 +111,8 @@ Notification    id, userId, type, title, body, link?, readAt?, createdAt
 ```
 students.csv ─┐
 schedule.csv ─┼─► validate.ts: разбор CSV (BOM, «;»/«,», кавычки) + Zod по каждой строке
-campus-map.json┘     + перекрёстные проверки (группы студентов есть в расписании, уникальность…)
+campus-map.json┘     карта — ТОЙ ЖЕ схемой, что и страница /map (lib/campus-map/schema.ts)
+                     + перекрёстные проверки (группы студентов есть в расписании, уникальность…)
                      │ ошибки → «файл, строка N: колонка «…» — …», выход ≠ 0, база не тронута
                      ▼
                  import.ts: хеши паролей (вне транзакции) → ОДНА транзакция:
@@ -127,7 +136,9 @@ campus-map.json┘     + перекрёстные проверки (группы
 - Открытое расписание вуза для любого вошедшего (`requireUser()` → `UserContext`): `listFaculties`,
   `searchScheduleTargets` (группы и преподаватели, **без студентов**), `getGroupSchedule`, `getTeacherSchedule`.
 - «Сегодня» — по Москве (`lib/moscow-time.ts`); результат — плоские объекты (даты `YYYY-MM-DD`, время `HH:MM`).
-- Период не длиннее 190 дней; неверные даты → `ScheduleRangeError`.
+- Период не длиннее 190 дней; неверные даты → `ScheduleRangeError` (общая `checkRange`).
+- Заглушки «Перенесено на …» на исходной дате — `lib/data/schedule-moves.ts`: те же правила и помощники
+  (`myGroupIds`, `checkRange`) из `lib/data/schedule.ts`.
 
 ## 4. Безопасность
 
@@ -153,6 +164,9 @@ campus-map.json┘     + перекрёстные проверки (группы
 - Роль проверяется на сервере для каждой страницы и действия (`requireStudent()`, `requireStaff()`).
   Они возвращают **контекст** (`StudentContext` / `StaffContext`) — брендированный тип,
   который нельзя случайно собрать вручную из id в адресе.
+- Общие для обеих ролей разделы (расписание группы/преподавателя, карта) — `requireUser()` → `UserContext`
+  (любой вошедший). Обработчики `app/api/*` вызывают `getUserContext()`: без сессии — ответ 401, а не редирект.
+  Поиск расписания (`/api/schedule/search`) возвращает только группы и преподавателей, без студентов.
 - **Студент:** все запросы к данным идут через функции из `lib/data/*`, которые принимают
   контекст и фильтруют по `studentId`. Id из адреса используется только вместе с фильтром владельца.
 - Студент, открывший `/staff`, перенаправляется в свой кабинет; сотрудник на страницах студента — в свой.
@@ -169,7 +183,8 @@ campus-map.json┘     + перекрёстные проверки (группы
 - План (этап 6): ночное пересоздание демо-данных по расписанию.
 
 ### 4.4 Секреты и данные
-- Секреты (`DATABASE_URL`, `SESSION_SECRET`, ключи ИИ) — только в переменных окружения сервера.
+- Секреты (`DATABASE_URL`, `POSTGRES_PASSWORD`, `DEMO_PASSWORD`, в будущем — ключи ИИ) — только в переменных окружения
+  сервера. Отдельного секрета для сессий нет: токен случайный, в базе — его SHA-256.
 - Никаких секретов в `NEXT_PUBLIC_*`, в коде и в репозитории. `.env` в `.gitignore`.
 - Все входные данные валидируются Zod на сервере.
 - Пароли и токены не пишутся в логи.
@@ -180,20 +195,28 @@ campus-map.json┘     + перекрёстные проверки (группы
   (`= + - @` в начале), записываются с апострофом. Оборванный импорт: `credentials.csv.tmp` при следующем
   запуске объединяется с основным файлом (только пароли, подходящие к хешам в базе).
 - Тот же «ID студента» с другим логином или ФИО — сессии аккаунта закрываются, в отчёте импорта предупреждение.
-- Файлы вуза — недоверенные данные: размер до 50 МБ, поля расписания до 300 символов (ссылка — до 2048),
+- Файлы вуза — недоверенные данные: размер до 50 МБ (`campus-map.json` — до 5 МБ), поля расписания до 300 символов (ссылка — до 2048),
   ФИО — только буквы, пробел, дефис, апостроф, точка. Из `campus-map.json` в браузер уходят только известные поля.
 - Ссылки на онлайн-занятия из файлов принимаются только `http(s)://` — `javascript:` не попадёт в кнопку;
   при отдаче и отрисовке ссылка ещё раз проверяется `safeExternalUrl` (`lib/safe-url.ts`).
 - Поиск расписания экранирует `%`, `_` и `\` (Prisma передаёт `contains` в ILIKE как есть).
 
 ### 4.5 Проверка
-- `tests/security.test.ts` — чужая заявка не открывается, сотрудник не видит и не меняет
-  заявки чужого факультета, пароли — только хеши argon2id, блокировка после 5 ошибок входа,
-  ошибки с одного адреса не блокируют аккаунт для других, лимит на подачу заявок.
-- `tests/university-data.test.ts` — сломанные файлы вуза дают понятные ошибки и не меняют базу.
-- `tests/university-import.test.ts` — повторный импорт идемпотентен и не меняет пароли.
-- `tests/schedule.test.ts` — личное расписание совпадает с подсчётом по CSV, без чужих языковых групп;
-  поиск не возвращает студентов.
+Автотесты (`npm test`, Vitest) — 124 теста в 10 файлах (замер 10 ноября):
+
+| Файл | Тестов | Что проверяет |
+|---|---|---|
+| `tests/security.test.ts` | 16 | Чужая заявка не открывается, сотрудник не видит и не меняет заявки чужого факультета, пароли — только хеши argon2id, блокировка после 5 ошибок входа, ошибки с одного адреса не блокируют аккаунт для других, лимит на подачу заявок |
+| `tests/password-change.test.ts` | 4 | Смена пароля тестовых аккаунтов (`isDemo`) и в `DEMO_MODE` отклоняется на сервере; обычный студент меняет |
+| `tests/university-data.test.ts` | 24 | Сломанные файлы вуза дают понятные ошибки и не меняют базу; `credentials.csv` без формул |
+| `tests/university-import.test.ts` | 3 | Повторный импорт идемпотентен, не меняет пароли; бывший тестовый студент получает новый пароль |
+| `tests/campus-map.test.ts` | 24 | Схема карты; файл, принятый импортом, принимает и `/map`; данные карты не вставляются как HTML |
+| `tests/schedule.test.ts` | 10 | Личное расписание совпадает с подсчётом по CSV, без чужих языковых групп; поиск без студентов; проходит и на другом наборе (`--seed 7`) |
+| `tests/schedule-search-api.test.ts` | 8 | `/api/schedule/search`: 401 без сессии и с поддельным токеном, без кеша, без студентов, только нужные поля |
+| `tests/schedule-moves.test.ts` | 14 | Разбор причины переноса «Перенесено с 03.11 (1 пара)» |
+| `tests/schedule-ui.test.ts` | 19 | Чистые функции экранов расписания (даты, подписи, адреса) и меню по ролям |
+| `tests/safe-url.test.ts` | 2 | В ссылку на онлайн-занятие попадает только `http(s)://` |
+
 - Аудит субагентом `security-reviewer` (8 ноября): утечек чужих данных и обхода ролей не найдено;
   найденные риски для демо-стенда исправлены, остальное — в `ROADMAP.md`, этапы 5–6.
 - Сквозная проверка в браузере (Playwright): вход, подача заявки, подмена адреса → 404,
@@ -211,30 +234,43 @@ campus-map.json┘     + перекрёстные проверки (группы
 app/
   (auth)/login/          страница входа
   (app)/                 кабинет: общая оболочка, меню по роли (lib/navigation.ts), error.tsx
-    (student)/           студент: today («Мой день»), requests, profile
+    (student)/           студент: today («Мой день»), requests, profile (+ loading.tsx у каждого раздела)
     (staff)/staff/       сотрудник: заявки факультета
     schedule/            расписание группы / преподавателя — обе роли
     map/                 карта кампуса — обе роли
-  api/schedule/search/   подсказки поиска (401 без сессии)
+  api/schedule/search/   подсказки поиска (getUserContext → 401 без сессии)
 lib/
-  auth/                  сессии, хеширование, ограничение попыток, requireStudent / requireStaff / requireUser
-  data/                  доступ к данным с проверкой владельца (schedule.ts — расписание)
-  university-data/       разбор, проверка и импорт файлов вуза
-  moscow-time.ts         даты и время по Москве
-  schedule/              чистые функции экранов расписания (даты, подписи, адреса)
-  navigation.ts          меню для каждой роли
+  auth/                  сессии, хеширование, ограничение попыток, requireStudent / requireStaff / requireUser,
+                         getUserContext (для API)
+  data/                  доступ к данным с проверкой владельца: schedule.ts — расписание,
+                         schedule-moves.ts — заглушки «Перенесено на …», requests, profile, account
+  university-data/       разбор, проверка и импорт файлов вуза; universityDataDir() — папка данных
+  campus-map/            схема campus-map.json (одна для карты и импорта), чтение файла, поиск аудитории
+  schedule/              чистые функции экранов расписания (даты, подписи, адреса, переносы)
+  requests/status.ts     подписи статусов заявок (и для клиента)
+  moscow-time.ts         даты и время по Москве (UNIVERSITY_TIME_ZONE)
+  safe-url.ts            safeExternalUrl — только http(s)-ссылки
+  config.ts              UNIVERSITY_NAME, DEMO_MODE
+  navigation.ts          меню и главная страница (HOME) для каждой роли
   validation/            схемы Zod
   generated/prisma/      клиент Prisma (генерируется, не коммитится)
-components/              UI-компоненты
+components/
+  ui/                    базовые компоненты (Button, Card, EmptyState, Skeleton, RetryButton…)
+  schedule/              карточка занятия, неделя, навигация по датам, поиск
+  campus-map/            обёртка карты кампуса для React
+public/campus-map/       карта кампуса без зависимостей (campus-map.js / .css), грузится в браузере
 prisma/
   schema.prisma          схема базы
   migrations/            миграции
   seed.ts                демо-контент поверх импорта
 data/university/         заменяемые файлы вуза (students.csv, schedule.csv, campus-map.json)
 scripts/                 import-university-data.ts (npm run data:import)
-tests/                   автотесты безопасности, импорта, расписания; fixtures/ — маленький набор файлов
-proxy.ts                 быстрый редирект на /login без cookie
+tools/                   генераторы данных: schedule-generator/ (расписание и студенты), campus-map/ (карта);
+                         в Docker-образ не попадают
+tests/                   автотесты безопасности, импорта, расписания, карты; fixtures/ — маленький набор файлов
+proxy.ts                 быстрый редирект на /login без cookie (matcher — список разделов)
 Dockerfile, docker-compose.yml
+secrets/                 (только на сервере, не в git) credentials.csv от импорта в Docker
 docs/                    документация проекта и для ИИ
 ```
 
