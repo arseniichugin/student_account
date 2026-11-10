@@ -81,6 +81,14 @@ async function main(): Promise<number> {
         `  Студентов: ${n(summary.students)} (новых аккаунтов ${n(summary.createdAccounts)}, удалено ${n(summary.removedStudents)})\n` +
         `  Занятий: ${n(summary.lessons)} (связей «занятие — группа» ${n(summary.lessonGroups)})`,
     );
+    if (summary.resetTestStudents > 0) {
+      console.log(`  Бывшим тестовым студентам выдан новый случайный пароль: ${n(summary.resetTestStudents)} (демо-пароль у них больше не работает)`);
+    }
+    if (summary.warnings.length > 0) {
+      console.log(`\nПроверьте (${summary.warnings.length}):`);
+      for (const w of summary.warnings.slice(0, MAX_WARNINGS_SHOWN)) console.log(`  ⚠ ${w}`);
+      if (summary.warnings.length > MAX_WARNINGS_SHOWN) console.log(`  …и ещё ${n(summary.warnings.length - MAX_WARNINGS_SHOWN)}`);
+    }
     console.log("\nТестовые аккаунты для жюри (пароль — DEMO_PASSWORD):");
     for (const s of summary.testStudents) {
       console.log(`  студент  ${s.login.padEnd(30)} ${s.fullName}, ${s.faculty}, ${s.course} курс, ${s.group}`);
