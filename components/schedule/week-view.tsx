@@ -2,11 +2,13 @@ import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { LessonList } from "@/components/schedule/lesson-card";
 import type { ScheduleLesson } from "@/lib/data/schedule";
+import type { MovedAwayLesson } from "@/lib/data/schedule-moves";
 import { formatDayShort, lessonsCountLabel } from "@/lib/schedule/dates";
 
 /**
  * Неделя по дням (пн–вс). Дни без занятий — одной строкой «нет занятий».
- * Заголовок дня — ссылка на вид «День» для этой даты.
+ * Заголовок дня (h3) — ссылка на вид «День» для этой даты; дисциплины в карточках — h4.
+ * movedAway — заглушки занятий, перенесённых с этого дня (ссылка ведёт на день, куда перенесли).
  */
 export function WeekView({
   days,
@@ -15,7 +17,7 @@ export function WeekView({
   showTeacher,
   showGroups,
 }: {
-  days: { date: string; lessons: ScheduleLesson[] }[];
+  days: { date: string; lessons: ScheduleLesson[]; movedAway?: MovedAwayLesson[] }[];
   today: string;
   dayHref: (date: string) => string;
   showTeacher?: boolean;
@@ -23,8 +25,8 @@ export function WeekView({
 }) {
   return (
     <div className="space-y-5">
-      {days.map(({ date, lessons }) =>
-        lessons.length === 0 ? (
+      {days.map(({ date, lessons, movedAway = [] }) =>
+        lessons.length === 0 && movedAway.length === 0 ? (
           <p key={date} className="rounded-card border border-dashed border-border px-4 py-3 text-sm text-muted">
             <span className="font-medium text-text">{formatDayShort(date)}</span>
             {date === today && " · сегодня"} — нет занятий
@@ -44,7 +46,15 @@ export function WeekView({
                 <ChevronRight className="size-4 text-muted" aria-hidden />
               </Link>
             </h3>
-            <LessonList lessons={lessons} showTeacher={showTeacher} showGroups={showGroups} columns />
+            <LessonList
+              lessons={lessons}
+              movedAway={movedAway}
+              movedHref={dayHref}
+              showTeacher={showTeacher}
+              showGroups={showGroups}
+              headingLevel={4}
+              columns
+            />
           </section>
         ),
       )}

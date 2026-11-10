@@ -20,6 +20,7 @@ import {
   weekRange,
   type ScheduleLesson,
 } from "@/lib/data/schedule";
+import { getGroupMovedAway, getMyMovedAway, getTeacherMovedAway, type MovedAwayLesson } from "@/lib/data/schedule-moves";
 import { addDaysIso, moscowToday } from "@/lib/moscow-time";
 import {
   firstParam,
@@ -42,6 +43,8 @@ type Loaded =
       title: string;
       meta: React.ReactNode;
       lessons: ScheduleLesson[];
+      /** Заглушки занятий, перенесённых с дат периода на другие */
+      movedAway: MovedAwayLesson[];
       showTeacher: boolean;
       showGroups?: boolean;
     }
@@ -184,7 +187,7 @@ export default async function SchedulePage({ searchParams }: PageProps<"/schedul
             </div>
           </Card>
 
-          {loaded.lessons.length === 0 ? (
+          {loaded.lessons.length === 0 && loaded.movedAway.length === 0 ? (
             <EmptyState
               icon={CalendarOff}
               title={view === "week" ? "На этой неделе занятий нет" : "Пар нет"}
@@ -199,14 +202,20 @@ export default async function SchedulePage({ searchParams }: PageProps<"/schedul
             </EmptyState>
           ) : view === "week" ? (
             <WeekView
-              days={groupLessonsByDate(loaded.lessons, from, to)}
+              days={withMovedAway(groupLessonsByDate(loaded.lessons, from, to), loaded.movedAway)}
               today={today}
               dayHref={(d) => href(d, "day")}
               showTeacher={loaded.showTeacher}
               showGroups={loaded.showGroups}
             />
           ) : (
-            <LessonList lessons={loaded.lessons} showTeacher={loaded.showTeacher} showGroups={loaded.showGroups} />
+            <LessonList
+              lessons={loaded.lessons}
+              movedAway={loaded.movedAway}
+              movedHref={(d) => href(d, "day")}
+              showTeacher={loaded.showTeacher}
+              showGroups={loaded.showGroups}
+            />
           )}
         </section>
       )}
@@ -226,7 +235,9 @@ async function load(
   const groupHref = (id: string) => scheduleHref({ target: { type: "group", id }, ...keep });
   try {
     if (target?.type === "group") {
-      const res = target.id ? await getGroupSchedule(ctx, target.id, from, to) : null;
+      const [res, movedAway] = target.id
+        ? await Promise.all([getGroupSchedule(ctx, target.id, from, to), getGroupMovedAway(ctx, target.id, from, to)])
+        : [null, []];
       if (!res) return { kind: "notFound", what: "group" };
       const g = res.group;
       return {
@@ -265,18 +276,22 @@ async function load(
           </>
         ),
         lessons: res.lessons,
+        movedAway,
         showTeacher: true,
       };
     }
 
     if (target?.type === "teacher") {
-      const res = target.id ? await getTeacherSchedule(ctx, target.id, from, to) : null;
+      const [res, movedAway] = target.id
+        ? await Promise.all([getTeacherSchedule(ctx, target.id, from, to), getTeacherMovedAway(ctx, target.id, from, to)])
+        : [null, []];
       if (!res) return { kind: "notFound", what: "teacher" };
       return {
         kind: "lessons",
         title: res.teacher.fullName,
         meta: <p>{["Преподаватель", res.teacher.rank].filter(Boolean).join(" · ")}</p>,
         lessons: res.lessons,
+        movedAway,
         showTeacher: false,
         showGroups: true,
       };
@@ -285,7 +300,11 @@ async function load(
     if (ctx.role === "STUDENT") {
       // Студенту по умолчанию — его расписание: академическая группа + его языковые группы (без чужих языков).
       const student = await requireStudent();
-      const [profile, lessons] = await Promise.all([getMyStudentProfile(student), getMyScheduleForRange(student, from, to)]);
+      const [profile, lessons, movedAway] = await Promise.all([
+        getMyStudentProfile(student),
+        getMyScheduleForRange(student, from, to),
+        getMyMovedAway(student, from, to),
+      ]);
       return {
         kind: "lessons",
         title: "Моё расписание",
@@ -304,6 +323,7 @@ async function load(
           </>
         ),
         lessons,
+        movedAway,
         showTeacher: true,
       };
     }
@@ -346,4 +366,9 @@ function GroupsByCourse({
       ))}
     </div>
   );
+}
+
+/** Добавляет к дням недели заглушки перенесённых с них занятий. */
+function withMovedAway<T extends { date: string }>(days: T[], movedAway: MovedAwayLesson[]): (T & { movedAway: MovedAwayLesson[] })[] {
+  return days.map((d) => ({ ...d, movedAway: movedAway.filter((m) => m.date === d.date) }));
 }

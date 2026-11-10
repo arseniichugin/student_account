@@ -161,8 +161,8 @@ export function lessonsCountLabel(n: number): string {
   return `${n} занятий`;
 }
 
-/** «1 пара», «1–2 пара»; null — номер не указан. */
+/** «1-я пара», «1–2 пары»; null — номер не указан. */
 export function pairLabel(pairStart: number | null, pairEnd: number | null): string | null {
   if (pairStart == null) return null;
-  return pairEnd != null && pairEnd !== pairStart ? `${pairStart}–${pairEnd} пара` : `${pairStart} пара`;
+  return pairEnd != null && pairEnd !== pairStart ? `${pairStart}–${pairEnd} пары` : `${pairStart}-я пара`;
 }

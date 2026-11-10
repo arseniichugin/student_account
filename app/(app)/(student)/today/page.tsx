@@ -12,6 +12,7 @@ import { requireStudent } from "@/lib/auth/guards";
 import { getMyStudentProfile } from "@/lib/data/profile";
 import { listMyRequests } from "@/lib/data/requests";
 import { getMyScheduleForDate, getMyScheduleForRange, type ScheduleLesson } from "@/lib/data/schedule";
+import { getMyMovedAway, type MovedAwayLesson } from "@/lib/data/schedule-moves";
 import { addDaysIso, moscowToday } from "@/lib/moscow-time";
 import { dayTiming, firstDayWithLessons, formatDayLong, parseDateParam } from "@/lib/schedule/dates";
 import { scheduleHref, todayHref } from "@/lib/schedule/links";
@@ -28,10 +29,11 @@ export default async function TodayPage({ searchParams }: PageProps<"/today">) {
   const date = parseDateParam((await searchParams).date, today);
   const isToday = date === today;
 
-  const [profile, requests, lessons] = await Promise.all([
+  const [profile, requests, lessons, movedAway] = await Promise.all([
     getMyStudentProfile(ctx),
     listMyRequests(ctx),
     getMyScheduleForDate(ctx, date),
+    getMyMovedAway(ctx, date, date),
   ]);
 
   const timing = isToday ? dayTiming(lessons, new Date()) : undefined;
@@ -85,7 +87,7 @@ export default async function TodayPage({ searchParams }: PageProps<"/today">) {
           </div>
         </Card>
 
-        {lessons.length === 0 ? (
+        {lessons.length === 0 && movedAway.length === 0 ? (
           <EmptyState
             icon={CalendarOff}
             title="Пар нет"
@@ -95,11 +97,11 @@ export default async function TodayPage({ searchParams }: PageProps<"/today">) {
           </EmptyState>
         ) : (
           <>
-            <DaySummary lessons={lessons} timing={timing} />
-            <LessonList lessons={lessons} timing={timing} />
+            <DaySummary lessons={lessons} movedAway={movedAway} timing={timing} />
+            <LessonList lessons={lessons} timing={timing} movedAway={movedAway} movedHref={(d) => todayHref(d, today)} />
             {lookahead && (
               <div className="flex flex-col items-start gap-1 rounded-card border border-dashed border-border p-4 text-sm text-muted sm:flex-row sm:items-center sm:gap-3">
-                <span>{!hasActive ? "Все пары этого дня отменены." : "На сегодня пары закончились."}</span>
+                <span>{!hasActive ? "Все пары этого дня отменены или перенесены." : "На сегодня пары закончились."}</span>
                 <NextDayLink nextDay={nextDay} today={today} variant="ghost" />
               </div>
             )}
@@ -191,9 +193,11 @@ function NextDayLink({
 /** Одна строка-ответ: что сейчас / что дальше; предупреждение, если в этот день есть изменения. */
 function DaySummary({
   lessons,
+  movedAway,
   timing,
 }: {
   lessons: ScheduleLesson[];
+  movedAway: MovedAwayLesson[];
   timing?: ReturnType<typeof dayTiming>;
 }) {
   const current = timing?.currentId ? lessons.find((l) => l.id === timing.currentId) : undefined;
@@ -201,7 +205,7 @@ function DaySummary({
   const changed = lessons.filter((l) => l.status !== "normal");
   const where = (l: ScheduleLesson) => (l.room ? `, ауд. ${l.room}` : l.isOnline ? ", онлайн" : "");
 
-  if (!current && !next && changed.length === 0) return null;
+  if (!current && !next && changed.length === 0 && movedAway.length === 0) return null;
   return (
     <div className="space-y-2">
       {(current || next) && (
@@ -220,21 +224,22 @@ function DaySummary({
           )}
         </p>
       )}
-      {changed.length > 0 && (
+      {(changed.length > 0 || movedAway.length > 0) && (
         <p className="flex items-start gap-2 rounded-xl bg-warning-soft px-3.5 py-2.5 text-sm text-warning">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
-          <span>Есть изменения в расписании: {changesText(changed)}.</span>
+          <span>Есть изменения в расписании: {changesText(changed, movedAway.length)}.</span>
         </p>
       )}
     </div>
   );
 }
 
-function changesText(changed: ScheduleLesson[]): string {
+function changesText(changed: ScheduleLesson[], movedAway: number): string {
   const n = (s: ScheduleLesson["status"]) => changed.filter((l) => l.status === s).length;
   return [
     n("cancelled") && `отменено — ${n("cancelled")}`,
-    n("moved") && `перенесено — ${n("moved")}`,
+    movedAway && `перенесено на другой день — ${movedAway}`,
+    n("moved") && `перенесено на этот день — ${n("moved")}`,
     n("replaced") && `замена преподавателя — ${n("replaced")}`,
   ]
     .filter(Boolean)

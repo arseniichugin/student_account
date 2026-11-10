@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { ArrowRightLeft, ExternalLink, MapPin, PlayCircle, Timer, UserRound, UserRoundCog, Users, Video, XCircle } from "lucide-react";
+import { MovedAwayCard } from "@/components/schedule/moved-away-card";
 import { buttonVariants } from "@/components/ui/button";
 import { roomMapHref } from "@/lib/campus-map/links";
 import type { ScheduleLesson, ScheduleLessonStatus } from "@/lib/data/schedule";
+import type { MovedAwayLesson } from "@/lib/data/schedule-moves";
 import { pairLabel } from "@/lib/schedule/dates";
 import { cn } from "@/lib/utils";
 
@@ -18,8 +20,8 @@ export type LessonHighlight = { kind: "current" | "next"; label: string };
 const badgeBase = "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium";
 
 /** «ауд. 1017» для номера, «Манеж-1» — для помещения с названием. */
-function roomLabel(room: string): { text: string; spoken: string } {
-  return /^\d/.test(room) ? { text: `ауд. ${room}`, spoken: `аудиторию ${room}` } : { text: room, spoken: room };
+function roomLabel(room: string): { text: string } {
+  return { text: /^\d/.test(room) ? `ауд. ${room}` : room };
 }
 
 /**
@@ -28,18 +30,22 @@ function roomLabel(room: string): { text: string; spoken: string } {
  *
  * showTeacher — показывать преподавателя (в расписании преподавателя он и так известен);
  * showGroups — показывать группы; по умолчанию только у занятий нескольких групп (поток).
+ * headingLevel — уровень заголовка дисциплины: 3 на «Сегодня» и в виде «День», 4 — в «Неделе» (под днём h3).
  */
 export function LessonCard({
   lesson: l,
   highlight,
   showTeacher = true,
   showGroups,
+  headingLevel = 3,
 }: {
   lesson: ScheduleLesson;
   highlight?: LessonHighlight;
   showTeacher?: boolean;
   showGroups?: boolean;
+  headingLevel?: 3 | 4;
 }) {
+  const Heading = headingLevel === 4 ? "h4" : "h3";
   const cancelled = l.status === "cancelled";
   const status = l.status === "normal" ? null : STATUS[l.status];
   const pair = pairLabel(l.pairStart, l.pairEnd);
@@ -85,9 +91,9 @@ export function LessonCard({
           </div>
         )}
 
-        <h3 className={cn("text-[16px] leading-snug font-semibold break-words", cancelled && "text-muted line-through")}>
+        <Heading className={cn("text-[16px] leading-snug font-semibold break-words", cancelled && "text-muted line-through")}>
           {l.discipline}
-        </h3>
+        </Heading>
         <p className="text-sm text-muted">{l.kind}</p>
 
         {l.note && (
@@ -119,7 +125,7 @@ export function LessonCard({
           {room && (
             <Link
               href={roomMapHref(l.room!)}
-              aria-label={`Показать ${room.spoken} на карте`}
+              aria-label={`${room.text}${l.building ? ` · ${l.building}` : ""} — показать на карте`}
               title={l.buildingAddress ?? undefined}
               className="-mx-2 inline-flex min-h-11 max-w-full items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-primary hover:bg-primary-soft"
             >
@@ -156,13 +162,24 @@ export function LessonCard({
   );
 }
 
-/** Список занятий одного дня. timing — отметки «идёт сейчас» / «следующая» (только для сегодня). */
+/** Порядок в списке дня: по номеру пары, затем по времени (заглушки переноса — на месте исходной пары). */
+function slotKey(x: { pairStart: number | null; start: string | null }): string {
+  return `${String(x.pairStart ?? 99).padStart(2, "0")}|${x.start ?? "99:99"}`;
+}
+
+/**
+ * Список занятий одного дня. timing — отметки «идёт сейчас» / «следующая» (только для сегодня).
+ * movedAway — заглушки занятий, перенесённых с этого дня на другой; movedHref — ссылка на день, куда перенесли.
+ */
 export function LessonList({
   lessons,
   timing,
   showTeacher,
   showGroups,
   columns = false,
+  headingLevel = 3,
+  movedAway = [],
+  movedHref,
 }: {
   lessons: ScheduleLesson[];
   timing?: { currentId: string | null; currentLabel: string | null; nextId: string | null; nextLabel: string | null };
@@ -170,25 +187,39 @@ export function LessonList({
   showGroups?: boolean;
   /** На компьютере — в две колонки (вид «Неделя») */
   columns?: boolean;
+  headingLevel?: 3 | 4;
+  movedAway?: MovedAwayLesson[];
+  movedHref?: (date: string) => string;
 }) {
+  const items = [
+    ...lessons.map((l) => ({ key: slotKey(l), lesson: l, moved: null })),
+    ...movedAway.map((m) => ({ key: slotKey(m), lesson: null, moved: m })),
+  ].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   return (
     <ul className={cn("grid grid-cols-1 gap-3", columns && "lg:grid-cols-2")}>
-      {lessons.map((l) => (
-        <li key={l.id}>
+      {items.map(({ lesson: l, moved }) =>
+        moved ? (
+          <li key={moved.id}>
+            <MovedAwayCard lesson={moved} headingLevel={headingLevel} href={movedHref?.(moved.toDate)} />
+          </li>
+        ) : (
+        <li key={l!.id}>
           <LessonCard
-            lesson={l}
+            lesson={l!}
             showTeacher={showTeacher}
             showGroups={showGroups}
+            headingLevel={headingLevel}
             highlight={
-              timing?.currentId === l.id
+              timing?.currentId === l!.id
                 ? { kind: "current", label: timing.currentLabel ?? "" }
-                : timing?.nextId === l.id
+                : timing?.nextId === l!.id
                   ? { kind: "next", label: timing.nextLabel ?? "" }
                   : undefined
             }
           />
         </li>
-      ))}
+        ),
+      )}
     </ul>
   );
 }

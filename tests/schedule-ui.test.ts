@@ -153,8 +153,8 @@ describe("Подписи дат и счётчики", () => {
       "21 занятие",
       "22 занятия",
     ]);
-    expect(pairLabel(1, 1)).toBe("1 пара");
-    expect(pairLabel(1, 2)).toBe("1–2 пара");
+    expect(pairLabel(1, 1)).toBe("1-я пара");
+    expect(pairLabel(1, 2)).toBe("1–2 пары");
     expect(pairLabel(null, null)).toBeNull();
   });
 });
