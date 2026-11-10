@@ -35,7 +35,7 @@ export function DisciplineAveragesChart({ disciplines }: { disciplines: MyDiscip
         <AveragesSvg disciplines={disciplines} row={60} bar={14} font={14} id="chart-avg-d" />
       </div>
       <figcaption className="mt-3 text-xs text-muted">
-        Пунктир — границы букв: 60 — E (ниже — FX), 74 — C, 90 — A. Средний считается по выставленным срезам.
+        Пунктир — границы букв: 60 — E (ниже — FX), 75 — C, 90 — A. Средний считается по выставленным срезам.
       </figcaption>
     </figure>
   );
@@ -111,7 +111,7 @@ function AveragesSvg({
 const TREND_H = 200;
 const PLOT_TOP = 26;
 const PLOT_BOTTOM = TREND_H - 46;
-/** Положение срезов по горизонтали (слева место под подписи 60/74/90). */
+/** Положение срезов по горизонтали (слева место под подписи 60/75/90). */
 const X = ["22%", "53%", "84%"] as const;
 
 /**

@@ -52,7 +52,7 @@ export const GRADE_SCALE: readonly GradeScaleEntry[] = [
   },
   {
     letter: "C",
-    min: 74,
+    min: 75,
     max: 81,
     label: "хорошо",
     five: 4,
@@ -63,8 +63,8 @@ export const GRADE_SCALE: readonly GradeScaleEntry[] = [
   },
   {
     letter: "D",
-    min: 64,
-    max: 73,
+    min: 67,
+    max: 74,
     label: "удовлетворительно",
     five: 3,
     failing: false,
@@ -75,7 +75,7 @@ export const GRADE_SCALE: readonly GradeScaleEntry[] = [
   {
     letter: "E",
     min: 60,
-    max: 63,
+    max: 66,
     label: "достаточно",
     five: 3,
     failing: false,
