@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { AlertTriangle, CalendarDays, CalendarOff, ChevronRight, FilePlus2 } from "lucide-react";
+import { TodayGradesLink } from "@/components/grades/today-grades-link";
 import { AutoRefresh } from "@/components/schedule/auto-refresh";
 import { LessonList } from "@/components/schedule/lesson-card";
 import { DateJumpForm, PeriodNav } from "@/components/schedule/period-nav";
@@ -9,6 +10,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/states";
 import { requireStudent } from "@/lib/auth/guards";
+import { getMyGradesDigest } from "@/lib/data/grades";
 import { getMyStudentProfile } from "@/lib/data/profile";
 import { listMyRequests } from "@/lib/data/requests";
 import { getMyScheduleForDate, getMyScheduleForRange, type ScheduleLesson } from "@/lib/data/schedule";
@@ -23,18 +25,19 @@ export const metadata: Metadata = { title: "Сегодня" };
 /** Сколько дней вперёд искать ближайший день с парами. */
 const LOOKAHEAD_DAYS = 14;
 
-/** «Мой день»: личное расписание на выбранный день (?date=YYYY-MM-DD), ниже — заявки. */
+/** «Мой день»: личное расписание на выбранный день (?date=YYYY-MM-DD), ниже — оценки (кратко) и заявки. */
 export default async function TodayPage({ searchParams }: PageProps<"/today">) {
   const ctx = await requireStudent();
   const today = moscowToday();
   const date = parseDateParam((await searchParams).date, today);
   const isToday = date === today;
 
-  const [profile, requests, lessons, movedAway] = await Promise.all([
+  const [profile, requests, lessons, movedAway, grades] = await Promise.all([
     getMyStudentProfile(ctx),
     listMyRequests(ctx),
     getMyScheduleForDate(ctx, date),
     getMyMovedAway(ctx, date, date),
+    getMyGradesDigest(ctx),
   ]);
 
   const timing = isToday ? dayTiming(lessons, new Date()) : undefined;
@@ -109,6 +112,8 @@ export default async function TodayPage({ searchParams }: PageProps<"/today">) {
           </>
         )}
       </section>
+
+      <TodayGradesLink digest={grades} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-6">
         <Card className="lg:col-span-2">
