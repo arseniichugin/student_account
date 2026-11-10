@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { AlertTriangle, CheckCircle2, Loader2, Undo2, Users } from "lucide-react";
-import { saveGradesAction } from "@/app/(app)/(teacher)/journal/actions";
+import { AlertTriangle, CheckCircle2, History, Loader2, Undo2, Users } from "lucide-react";
+import { loadJournalAction, saveGradesAction } from "@/app/(app)/(teacher)/journal/actions";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/states";
@@ -45,7 +45,69 @@ function fieldLabel(s: JournalStudent, col: Col, finalKind: "EXAM" | "CREDIT" | 
   return finalKind === "CREDIT" ? `${shortName(s)}, зачёт` : `${shortName(s)}, экзамен, баллы`;
 }
 
-type Banner = { type: "success" | "error"; text: string } | null;
+/** Значение ячейки в базе — для оптимистичной блокировки (saveGrades сверяет его с тем, что в базе сейчас). */
+function expectedValue(s: JournalStudent, col: Col): number | boolean | null {
+  const v = savedValue(s, col);
+  if (v === "") return null;
+  if (v === "pass" || v === "fail") return v === "pass";
+  return Number(v);
+}
+
+/** Как сервер описывает конфликт: что уже стоит в базе вместо того, что видел преподаватель. */
+function conflictText(before: string, now: string): string {
+  const shown = (v: string) => (v === "pass" ? formatCredit(true) : v === "fail" ? formatCredit(false) : v);
+  if (now === "") return "Оценку уже стёрли";
+  return before === "" ? `Оценку уже поставили: ${shown(now)}` : `Оценку уже изменили: ${shown(now)}`;
+}
+
+/** Плашка после сохранения: сколько выставлено и сколько стёрто, где студент увидит оценку. */
+function savedMessage(saved: number, cleared: number): string {
+  if (saved === 0 && cleared === 0) return "Сохранено. Оценки уже были такими.";
+  const parts: string[] = [];
+  if (saved > 0) parts.push(`Сохранено: ${gradesLabel(saved)}`);
+  if (cleared > 0) parts.push(`${saved > 0 ? "стёрто" : "Стёрто"}: ${gradesLabel(cleared)}`);
+  const where =
+    saved === 0
+      ? ""
+      : saved === 1
+        ? " Студент увидит её в разделе «Оценки» и на странице «Сегодня»."
+        : " Студенты увидят их в разделе «Оценки» и на странице «Сегодня».";
+  return `${parts.join(", ")}.${where}`;
+}
+
+/** Обрыв сети (запрос не дошёл до сервера) — в отличие от ошибки на самом сервере. */
+function isNetworkError(e: unknown): boolean {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return true;
+  return e instanceof TypeError && /fetch|network|load failed/i.test(e.message);
+}
+
+// Черновик журнала в sessionStorage: кнопка «Назад» браузера (переход внутри кабинета) не вызывает
+// beforeunload, и несохранённые оценки пропали бы молча. При возврате на журнал — восстанавливаем.
+const draftsStorageKey = (assignmentId: string) => `journal-drafts:${assignmentId}`;
+type StoredDrafts = { drafts: Record<string, string>; base: Record<string, string> };
+
+function readStoredDrafts(assignmentId: string): StoredDrafts | null {
+  try {
+    const raw = window.sessionStorage.getItem(draftsStorageKey(assignmentId));
+    if (!raw) return null;
+    const v = JSON.parse(raw) as Partial<StoredDrafts> | null;
+    if (!v || !v.drafts || !v.base || typeof v.drafts !== "object" || typeof v.base !== "object") return null;
+    return { drafts: v.drafts, base: v.base };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredDrafts(assignmentId: string, value: StoredDrafts | null) {
+  try {
+    if (value) window.sessionStorage.setItem(draftsStorageKey(assignmentId), JSON.stringify(value));
+    else window.sessionStorage.removeItem(draftsStorageKey(assignmentId));
+  } catch {
+    // Приватный режим или запрет хранилища — журнал работает и без черновика
+  }
+}
+
+type Banner = { type: "success" | "error" | "info"; text: string; action?: { label: string; onClick: () => void } } | null;
 
 export function JournalEditor({ journal }: { journal: Journal }) {
   const finalKind = journal.assignment.final?.kind ?? null;
@@ -166,7 +228,7 @@ export function JournalEditor({ journal }: { journal: Journal }) {
       });
     }
     if (justSaved.size > 0) setJustSaved(new Set());
-    if (banner?.type === "success") setBanner(null);
+    if (banner && banner.type !== "error") setBanner(null);
   };
 
   const discard = () => {
@@ -178,16 +240,22 @@ export function JournalEditor({ journal }: { journal: Journal }) {
     setBanner(null);
   };
 
+  /** Запись для сервера; expected — что сейчас показано как сохранённое (сервер сверит с базой). */
   const toEntry = (key: string, text: string): GradeEntryInput => {
     const [studentId, c] = key.split(":") as [string, string];
     const t = text.trim();
+    const s = byId.get(studentId)!;
     if (c !== "final") {
       const p = parsePointsInput(t);
-      return { studentId, kind: "CHECKPOINT", checkpoint: Number(c) as CheckpointNo, points: p.ok ? p.points : null };
+      const col = Number(c) as CheckpointNo;
+      return { studentId, kind: "CHECKPOINT", checkpoint: col, points: p.ok ? p.points : null, expected: expectedValue(s, col) as number | null };
     }
-    if (finalKind === "CREDIT") return { studentId, kind: "CREDIT", passed: t === "pass" ? true : t === "fail" ? false : null };
+    if (finalKind === "CREDIT") {
+      const passed = t === "pass" ? true : t === "fail" ? false : null;
+      return { studentId, kind: "CREDIT", passed, expected: expectedValue(s, "final") as boolean | null };
+    }
     const p = parsePointsInput(t);
-    return { studentId, kind: "EXAM", points: p.ok ? p.points : null };
+    return { studentId, kind: "EXAM", points: p.ok ? p.points : null, expected: expectedValue(s, "final") as number | null };
   };
 
   const save = () => {
@@ -213,10 +281,11 @@ export function JournalEditor({ journal }: { journal: Journal }) {
     setBanner(null);
     startTransition(async () => {
       let savedCount = 0;
+      let clearedCount = 0;
       const savedKeys: string[] = [];
       const updated = new Map<string, JournalStudent>();
       let lastAssignment: TeacherAssignment | null = null;
-      let failure: { text: string; errors: Record<string, string> } | null = null;
+      let failure: { text: string; errors: Record<string, string>; conflict: boolean } | null = null;
 
       try {
         // Группа целиком (до ~30 человек × 4 колонки) может не влезть в одно сохранение — частями
@@ -229,25 +298,51 @@ export function JournalEditor({ journal }: { journal: Journal }) {
               const k = chunk[fe.index];
               if (k && !errors[k]) errors[k] = fe.message;
             }
-            failure = { text: r.error, errors };
+            // Конфликт: в базе уже другое — показываем свежие значения, введённое преподавателем остаётся в полях
+            if (r.conflict) {
+              r.conflict.students.forEach((s) => updated.set(s.id, s));
+              lastAssignment = r.conflict.assignment;
+            }
+            failure = { text: r.error, errors, conflict: !!r.conflict };
             break;
           }
           savedCount += r.saved;
+          clearedCount += r.cleared;
           savedKeys.push(...chunk);
           r.students.forEach((s) => updated.set(s.id, s));
           lastAssignment = r.assignment;
         }
-      } catch {
-        failure = { text: "Не удалось сохранить: нет связи с сервером. Проверьте интернет и нажмите «Сохранить» ещё раз.", errors: {} };
+      } catch (e) {
+        failure = {
+          text: isNetworkError(e)
+            ? "Не удалось сохранить: нет связи с сервером. Проверьте интернет и нажмите «Сохранить» ещё раз"
+            : "Сервер не смог сохранить оценки. Попробуйте через минуту — введённые оценки останутся в полях",
+          errors: {},
+          conflict: false,
+        };
       }
 
-      if (savedKeys.length > 0) {
+      if (updated.size > 0) {
         setStudents((list) => list.map((s) => updated.get(s.id) ?? s));
         if (lastAssignment) setAssignment(lastAssignment);
-        // Убираем из черновика только то, что ушло на сервер и с тех пор не менялось
+      }
+      // Конфликт, где в базе уже ровно то, что ввёл преподаватель, — не конфликт: черновик и ошибку убираем
+      const settled: string[] = [];
+      if (failure?.conflict) {
+        for (const k of Object.keys(failure.errors)) {
+          const [sid, c] = k.split(":");
+          const fresh = updated.get(sid!);
+          if (fresh && sent[k]?.trim() === savedValue(fresh, c === "final" ? "final" : (Number(c) as CheckpointNo))) {
+            settled.push(k);
+            delete failure.errors[k];
+          }
+        }
+      }
+      if (savedKeys.length > 0 || settled.length > 0) {
+        // Убираем из черновика только то, что ушло на сервер (или уже стоит в базе) и с тех пор не менялось
         setDrafts((d) => {
           const next = { ...d };
-          for (const k of savedKeys) if (next[k] === sent[k]) delete next[k];
+          for (const k of [...savedKeys, ...settled]) if (next[k] === sent[k]) delete next[k];
           return next;
         });
         setJustSaved(new Set(savedKeys));
@@ -256,23 +351,23 @@ export function JournalEditor({ journal }: { journal: Journal }) {
       if (failure) {
         const errKeys = Object.keys(failure.errors);
         setServerErrors(failure.errors);
-        const savedNote = savedKeys.length > 0 ? ` Часть оценок сохранена (${gradesLabel(savedCount)}).` : " Ничего не сохранено.";
+        const done = savedCount + clearedCount;
+        const savedNote = savedKeys.length > 0 ? ` Часть оценок сохранена (${gradesLabel(done)}).` : " Ничего не сохранено.";
+        const conflictNote =
+          failure.conflict && errKeys.length > 0 ? " У полей — что сейчас в базе; чтобы записать свои оценки, нажмите «Сохранить» ещё раз." : "";
         setBanner({
           type: "error",
-          text: errKeys.length > 0 ? `${failure.text}: ${errKeys.length} ${plural(errKeys.length, ["ошибка", "ошибки", "ошибок"])} у полей.${savedNote}` : `${failure.text}.${savedNote}`.replace("..", "."),
+          text:
+            errKeys.length > 0
+              ? `${failure.text}: ${errKeys.length} ${plural(errKeys.length, ["ошибка", "ошибки", "ошибок"])} у полей.${savedNote}${conflictNote}`
+              : `${failure.text}.${savedNote}`,
         });
         if (errKeys.length > 0) focusCell(firstInOrder(errKeys));
         return;
       }
 
       setServerErrors({});
-      setBanner({
-        type: "success",
-        text:
-          savedCount > 0
-            ? `Сохранено: ${gradesLabel(savedCount)}. ${savedCount === 1 ? "Студент увидит её в разделе «Оценки» и получит уведомление." : "Студенты увидят их в разделе «Оценки» и получат уведомления."}`
-            : "Сохранено. Оценки уже были такими.",
-      });
+      setBanner({ type: "success", text: savedMessage(savedCount, clearedCount) });
     });
   };
 
@@ -319,6 +414,111 @@ export function JournalEditor({ journal }: { journal: Journal }) {
     };
   }, [dirtyCount]);
 
+  // Черновик → sessionStorage (только после восстановления при открытии, см. ниже). base — что было
+  // сохранено в момент правки: если к возврату на журнал в базе уже другое, покажем конфликт у поля.
+  const assignmentId = assignment.id;
+  const draftsLoaded = useRef(false);
+  useEffect(() => {
+    if (!draftsLoaded.current) return;
+    if (Object.keys(drafts).length === 0) return writeStoredDrafts(assignmentId, null);
+    const base: Record<string, string> = {};
+    for (const k of Object.keys(drafts)) {
+      const [sid, c] = k.split(":");
+      const s = byId.get(sid!);
+      if (s) base[k] = savedValue(s, c === "final" ? "final" : (Number(c) as CheckpointNo));
+    }
+    writeStoredDrafts(assignmentId, { drafts, base });
+  }, [drafts, byId, assignmentId]);
+
+  // Возврат на журнал («Назад»/«Вперёд» браузера, меню, перезагрузка вкладки) — восстановить черновик
+  useEffect(() => {
+    // sessionStorage есть только в браузере: читаем после первой отрисовки, отдельной задачей
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      if (cancelled) return;
+      const stored = readStoredDrafts(assignmentId);
+      draftsLoaded.current = true;
+      if (!stored) return;
+      const restored: Record<string, string> = {};
+      const conflicts: Record<string, string> = {};
+      for (const [k, text] of Object.entries(stored.drafts)) {
+        const [sid, c] = k.split(":");
+        const s = journal.students.find((x) => x.id === sid);
+        if (!s || typeof text !== "string" || !(c === "1" || c === "2" || c === "3" || (c === "final" && finalKind))) continue;
+        const col: Col = c === "final" ? "final" : (Number(c) as CheckpointNo);
+        const now = savedValue(s, col);
+        if (text.trim() === now) continue;
+        restored[k] = text;
+        const before = stored.base[k];
+        if (typeof before === "string" && before !== now) conflicts[k] = conflictText(before, now);
+      }
+      const n = Object.keys(restored).length;
+      if (n === 0) return writeStoredDrafts(assignmentId, null);
+      setDrafts(restored);
+      setServerErrors(conflicts);
+      setBanner({
+        type: "info",
+        text: `Восстановлены несохранённые оценки: ${n}. Проверьте их и нажмите «Сохранить».`,
+        action: {
+          label: "Отменить",
+          onClick: () => {
+            setDrafts({});
+            setServerErrors({});
+            setBanner(null);
+          },
+        },
+      });
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // Только при открытии журнала
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Вернулись на вкладку, а несохранённого нет — подтянуть свежие оценки (вторая вкладка, второй семинарист).
+  // При черновиках не трогаем: расхождение покажет сервер при сохранении (конфликт у поля).
+  const idle = useRef({ dirty: 0, pending: false, at: 0 });
+  useEffect(() => {
+    idle.current.dirty = dirtyCount;
+    idle.current.pending = pending;
+  }, [dirtyCount, pending]);
+  useEffect(() => {
+    const refresh = async () => {
+      const st = idle.current;
+      if (document.visibilityState !== "visible" || st.dirty > 0 || st.pending || Date.now() - st.at < 5_000) return;
+      st.at = Date.now();
+      try {
+        const fresh = await loadJournalAction(assignmentId);
+        if (fresh && idle.current.dirty === 0 && !idle.current.pending) {
+          setStudents(fresh.students);
+          setAssignment(fresh.assignment);
+        }
+      } catch {
+        // Нет связи — обновим в следующий раз
+      }
+    };
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [assignmentId]);
+
+  // Ctrl+S (⌘S) — сохранить, где бы ни был фокус, пока открыт журнал (и не открывать «Сохранить страницу»)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      if (e.code !== "KeyS" && e.key.toLowerCase() !== "s") return;
+      e.preventDefault();
+      formRef.current?.requestSubmit();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   // ─── Отрисовка ─────────────────────────────────────────────────────
 
   if (students.length === 0) {
@@ -360,7 +560,7 @@ export function JournalEditor({ journal }: { journal: Journal }) {
   const inputClass = (st: ReturnType<typeof cellState>, big = false) =>
     cn(
       "rounded-lg border bg-surface text-center tabular-nums text-text outline-none transition-colors placeholder:text-muted focus:ring-2",
-      big ? "h-12 w-24 text-[20px] font-semibold" : "h-11 w-14 text-[16px]",
+      big ? "h-12 w-24 text-[20px] font-semibold" : "h-11 w-12 text-[16px] xl:w-14",
       st.error
         ? "border-danger bg-danger-soft focus:ring-danger/30"
         : st.dirty
@@ -397,7 +597,7 @@ export function JournalEditor({ journal }: { journal: Journal }) {
             type="text"
             inputMode="numeric"
             pattern="[0-9]*"
-            maxLength={3}
+            maxLength={6}
             autoComplete="off"
             enterKeyHint={index === students.length - 1 ? "done" : "next"}
             value={st.text}
@@ -433,7 +633,7 @@ export function JournalEditor({ journal }: { journal: Journal }) {
           aria-describedby={describedBy(st, id, false)}
           onChange={(e) => setCell(s, "final", e.target.value)}
           onKeyDown={onFieldKeyDown("d", index, "final")}
-          className={cn(inputClass(st), "w-36 px-2 text-left text-[14px]", st.text === "fail" && !st.dirty && "text-danger")}
+          className={cn(inputClass(st), "w-34 px-2 text-left text-[13px] xl:w-36 xl:text-[14px]", st.text === "fail" && !st.dirty && "text-danger")}
         >
           <option value="">не выставлено</option>
           <option value="pass">зачтено</option>
@@ -549,12 +749,6 @@ export function JournalEditor({ journal }: { journal: Journal }) {
         e.preventDefault();
         save();
       }}
-      onKeyDown={(e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
-          e.preventDefault();
-          save();
-        }
-      }}
       className="space-y-4"
     >
       {/* Прогресс группы (компьютер; на телефоне — в переключателе колонок) — обновляется после сохранения */}
@@ -620,6 +814,8 @@ export function JournalEditor({ journal }: { journal: Journal }) {
           {mode !== "final" && ` · ${dueLabel(CHECKPOINTS[mode - 1]!.due)}`}
           {mode === "final" && journal.assignment.final?.date && ` · ${formatDayMonthLong(journal.assignment.final.date)}`}
         </p>
+        {/* Порядок заголовков h1 → h2 → h3 (ФИО студента — h3) */}
+        <h2 className="sr-only">Студенты</h2>
         <ol className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {students.map((s, i) => {
             const avg = liveAverage(s);
@@ -664,7 +860,7 @@ export function JournalEditor({ journal }: { journal: Journal }) {
           </caption>
           <thead>
             <tr className="text-[13px] text-muted">
-              <th scope="col" className="sticky top-0 left-0 z-30 border-b border-border bg-surface px-3 py-2.5 font-medium">
+              <th scope="col" className="sticky top-0 left-0 z-30 border-b border-border bg-surface px-2 py-2.5 font-medium xl:px-3">
                 Студент
               </th>
               {CP_COLS.map((c) => (
@@ -672,7 +868,7 @@ export function JournalEditor({ journal }: { journal: Journal }) {
                   key={c}
                   scope="col"
                   className={cn(
-                    "sticky top-0 z-20 border-b border-border px-1.5 py-2.5 font-medium xl:px-2 whitespace-nowrap",
+                    "sticky top-0 z-20 border-b border-border px-1.5 py-2.5 font-medium xl:px-2 xl:whitespace-nowrap",
                     c === current ? "bg-primary-soft text-primary" : "bg-surface",
                   )}
                 >
@@ -689,7 +885,7 @@ export function JournalEditor({ journal }: { journal: Journal }) {
               <th
                 scope="col"
                 className={cn(
-                  "sticky top-0 z-20 border-b border-border px-1.5 py-2.5 font-medium xl:px-2 whitespace-nowrap",
+                  "sticky top-0 z-20 border-b border-border px-1.5 py-2.5 font-medium xl:px-2 xl:whitespace-nowrap",
                   current === null ? "bg-primary-soft text-primary" : "bg-surface",
                 )}
               >
@@ -707,9 +903,9 @@ export function JournalEditor({ journal }: { journal: Journal }) {
                 <tr key={s.id} className="group align-top">
                   <th
                     scope="row"
-                    className="sticky left-0 z-10 border-b border-border bg-surface px-3 py-2 text-left font-normal group-last:border-0 group-hover:bg-surface-muted"
+                    className="sticky left-0 z-10 border-b border-border bg-surface px-2 py-2 text-left font-normal group-last:border-0 group-hover:bg-surface-muted xl:px-3"
                   >
-                    <span className="block min-w-40 font-medium break-words text-text">
+                    <span className="block min-w-32 font-medium xl:min-w-40 break-words text-text">
                       <span className="mr-1.5 text-muted tabular-nums">{i + 1}.</span>
                       {s.fullName}
                     </span>
@@ -761,15 +957,30 @@ export function JournalEditor({ journal }: { journal: Journal }) {
             role={banner.type === "error" ? "alert" : "status"}
             className={cn(
               "mb-2 flex items-start gap-2 rounded-xl border px-3.5 py-2.5 text-sm shadow-sm",
-              banner.type === "error" ? "border-danger/30 bg-danger-soft text-danger" : "border-success/30 bg-success-soft text-success",
+              banner.type === "error"
+                ? "border-danger/30 bg-danger-soft text-danger"
+                : banner.type === "info"
+                  ? "border-primary/30 bg-primary-soft text-text"
+                  : "border-success/30 bg-success-soft text-success",
             )}
           >
             {banner.type === "error" ? (
               <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+            ) : banner.type === "info" ? (
+              <History className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
             ) : (
               <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden />
             )}
-            <span>{banner.text}</span>
+            <span className="min-w-0 flex-1">{banner.text}</span>
+            {banner.action && (
+              <button
+                type="button"
+                onClick={banner.action.onClick}
+                className="-my-2.5 -mr-1.5 min-h-11 shrink-0 rounded-lg px-2 font-medium text-primary underline-offset-2 hover:underline"
+              >
+                {banner.action.label}
+              </button>
+            )}
           </div>
         )}
         {/* На телефоне панель без изменений не нужна — не закрываем ею карточки */}
