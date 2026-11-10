@@ -8,9 +8,11 @@ import {
   checkpointStats,
   daysUntilLabel,
   disciplineIssues,
+  finalPassed,
   hasFailing,
   overallFromCheckpoints,
   pointsWord,
+  worstFailingLetter,
 } from "@/lib/grades/stats";
 
 const d = (points: (number | null)[], finalResult: Parameters<typeof hasFailing>[0]["finalResult"] = null) => ({
@@ -20,9 +22,9 @@ const d = (points: (number | null)[], finalResult: Parameters<typeof hasFailing>
 
 describe("Проблемные дисциплины", () => {
   it("FX/F за срез — проблема, даже если средний уже выше порога", () => {
-    expect(disciplineIssues(d([48, 100, null]))).toEqual({ checkpoints: [1], final: false });
+    expect(disciplineIssues(d([48, 100, null]))).toEqual({ checkpoints: [1], settled: [], final: false });
     expect(hasFailing(d([48, 100, null]))).toBe(true);
-    expect(disciplineIssues(d([30, 59, 60]))).toEqual({ checkpoints: [1, 2], final: false });
+    expect(disciplineIssues(d([30, 59, 60]))).toEqual({ checkpoints: [1, 2], settled: [], final: false });
   });
 
   it("60 баллов (E) — уже не проблема; пустые срезы — тоже", () => {
@@ -35,6 +37,39 @@ describe("Проблемные дисциплины", () => {
     expect(disciplineIssues(d([90, 90, 90], { kind: "CREDIT", passed: true })).final).toBe(false);
     expect(disciplineIssues(d([90, 90, 90], { kind: "EXAM", ...scored(59) })).final).toBe(true);
     expect(disciplineIssues(d([90, 90, 90], { kind: "EXAM", ...scored(60) })).final).toBe(false);
+  });
+
+  it("сданный зачёт гасит FX/F за срезы: долга больше нет", () => {
+    const credited = d([48, 30, null], { kind: "CREDIT", passed: true });
+    expect(disciplineIssues(credited)).toEqual({ checkpoints: [], settled: [1, 2], final: false });
+    expect(hasFailing(credited)).toBe(false);
+    expect(worstFailingLetter(credited)).toBeNull();
+  });
+
+  it("экзамен ≥ 60 гасит долг по срезам, экзамен ниже 60 — нет", () => {
+    expect(hasFailing(d([48, null, null], { kind: "EXAM", ...scored(60) }))).toBe(false);
+    expect(disciplineIssues(d([48, null, null], { kind: "EXAM", ...scored(60) })).settled).toEqual([1]);
+    const failedExam = d([48, null, null], { kind: "EXAM", ...scored(59) });
+    expect(disciplineIssues(failedExam)).toEqual({ checkpoints: [1], settled: [], final: true });
+    expect(hasFailing(failedExam)).toBe(true);
+    // «не зачтено» долг не гасит
+    expect(hasFailing(d([48, null, null], { kind: "CREDIT", passed: false }))).toBe(true);
+  });
+
+  it("итоговый контроль сдан: зачтено или экзамен от 60 баллов", () => {
+    expect(finalPassed(null)).toBe(false);
+    expect(finalPassed({ kind: "CREDIT", passed: true })).toBe(true);
+    expect(finalPassed({ kind: "CREDIT", passed: false })).toBe(false);
+    expect(finalPassed({ kind: "EXAM", ...scored(60) })).toBe(true);
+    expect(finalPassed({ kind: "EXAM", ...scored(59) })).toBe(false);
+  });
+
+  it("худшая буква долга: F («повторить курс») важнее FX («можно пересдать»)", () => {
+    expect(worstFailingLetter(d([48, null, null]))).toBe("FX");
+    expect(worstFailingLetter(d([48, 30, null]))).toBe("F");
+    expect(worstFailingLetter(d([90, null, null], { kind: "CREDIT", passed: false }))).toBe("FX");
+    expect(worstFailingLetter(d([90, null, null], { kind: "EXAM", ...scored(20) }))).toBe("F");
+    expect(worstFailingLetter(d([90, 80, null]))).toBeNull();
   });
 });
 

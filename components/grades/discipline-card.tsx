@@ -1,16 +1,17 @@
-import { AlertTriangle, CalendarCheck, UserRound } from "lucide-react";
+import { AlertTriangle, CalendarCheck, CircleCheck, UserRound } from "lucide-react";
 import { GradeBadge } from "@/components/grades/grade-badge";
 import { disciplineAnchor } from "@/components/grades/grades-summary";
 import type { GradeCell, MyDisciplineGrades } from "@/lib/data/grades";
 import { formatCredit, scaleEntry } from "@/lib/grades/scale";
-import { disciplineIssues, isFailingLetter } from "@/lib/grades/stats";
+import { FAILING_ADVICE, disciplineIssues, isFailingLetter, type DisciplineIssues } from "@/lib/grades/stats";
 import { CHECKPOINTS, FINAL_KIND_LABEL, type CheckpointNo } from "@/lib/grades/term";
 import { formatDayMonthLong } from "@/lib/schedule/dates";
 import { cn } from "@/lib/utils";
 
 /**
  * Карточка дисциплины: средний (буква + баллы), три среза со сроками, итоговый контроль и его оценка,
- * преподаватели семинаров. FX/F — заметной рамкой и пояснением, но спокойным тоном.
+ * преподаватели семинаров. Непогашенный FX/F — заметной рамкой и пояснением, но спокойным тоном;
+ * FX/F за срез, закрытый сданным экзаменом или зачётом, — короткой спокойной пометкой «долг закрыт».
  */
 export function DisciplineCard({
   discipline: d,
@@ -52,10 +53,26 @@ export function DisciplineCard({
           <span>{issueText(d, issues)}</span>
         </p>
       )}
+      {issues.settled.length > 0 && (
+        <p className="flex items-start gap-2 rounded-xl bg-success-soft px-3 py-2 text-sm text-success">
+          <CircleCheck className="mt-0.5 size-4 shrink-0" aria-hidden />
+          <span>
+            {checkpointList(d, issues.settled)} закрыт{issues.settled.length > 1 ? "ы" : ""}:{" "}
+            {d.finalResult?.kind === "CREDIT" ? "зачёт сдан" : "экзамен сдан"}.
+          </span>
+        </p>
+      )}
 
       <ol className="grid grid-cols-3 gap-2" aria-label="Срезы">
         {CHECKPOINTS.map((c, i) => (
-          <CheckpointCell key={c.no} label={c.label} due={c.due} cell={d.checkpoints[i]!} current={c.no === currentCheckpoint} />
+          <CheckpointCell
+            key={c.no}
+            label={c.label}
+            due={c.due}
+            cell={d.checkpoints[i]!}
+            current={c.no === currentCheckpoint}
+            debt={issues.checkpoints.includes(c.no)}
+          />
         ))}
       </ol>
 
@@ -93,15 +110,27 @@ export function DisciplineCard({
   );
 }
 
-function CheckpointCell({ label, due, cell, current }: { label: string; due: string; cell: GradeCell; current: boolean }) {
+function CheckpointCell({
+  label,
+  due,
+  cell,
+  current,
+  debt,
+}: {
+  label: string;
+  due: string;
+  cell: GradeCell;
+  current: boolean;
+  /** FX/F за этот срез ещё не закрыт итоговым контролем */
+  debt: boolean;
+}) {
   const e = cell ? scaleEntry(cell.letter) : null;
-  const failing = !!cell && isFailingLetter(cell.letter);
   return (
     <li
       className={cn(
         "flex min-w-0 flex-col items-center rounded-xl px-1 py-2 text-center",
         e ? e.tone.bg : "bg-surface-muted",
-        failing && "ring-1 ring-grade-fx",
+        debt && "ring-1 ring-grade-fx",
         !cell && current && "ring-1 ring-primary/60 ring-inset",
       )}
     >
@@ -146,13 +175,39 @@ function FinalResultView({ result }: { result: MyDisciplineGrades["finalResult"]
   );
 }
 
-function issueText(d: MyDisciplineGrades, issues: ReturnType<typeof disciplineIssues>): string {
+/** «FX за 1-й срез», «FX за 1-й срез, F за 2-й срез» */
+function checkpointList(d: MyDisciplineGrades, nos: readonly CheckpointNo[]): string {
+  return nos.map((no) => `${d.checkpoints[no - 1]!.letter} за ${no}-й срез`).join(", ");
+}
+
+/**
+ * Пояснение к непогашенному долгу: что не так и что это значит. FX — «можно пересдать»,
+ * F — «нужно повторить курс» (как в шкале lib/grades/scale.ts); «не зачтено» — зачёт можно пересдать.
+ */
+function issueText(d: MyDisciplineGrades, issues: DisciplineIssues): string {
   const parts: string[] = [];
-  if (issues.checkpoints.length > 0) {
-    const cells = issues.checkpoints.map((no) => `${d.checkpoints[no - 1]!.letter} за ${no}-й срез`);
-    parts.push(cells.join(", "));
+  for (const letter of ["FX", "F"] as const) {
+    const nos = issues.checkpoints.filter((no) => d.checkpoints[no - 1]!.letter === letter);
+    if (nos.length > 0) parts.push(`${checkpointList(d, nos)} — ${FAILING_ADVICE[letter]}`);
   }
-  if (issues.final) parts.push(d.finalResult?.kind === "CREDIT" ? "зачёт не сдан" : "экзамен ниже 60 баллов");
-  const fixed = d.average && !isFailingLetter(d.average.letter) ? " Средний уже выше порога." : "";
-  return `${parts.join("; ")[0]!.toUpperCase()}${parts.join("; ").slice(1)} — можно исправить, спросите преподавателя семинаров.${fixed}`;
+  const f = d.finalResult;
+  if (issues.final && f) {
+    parts.push(
+      f.kind === "CREDIT"
+        ? "зачёт не сдан — можно пересдать"
+        : `экзамен — ${f.letter} (${f.points}) — ${FAILING_ADVICE[f.letter === "F" ? "F" : "FX"]}`,
+    );
+  }
+  const text = parts.join("; ");
+  const ask = /повторить курс/.test(text)
+    ? " Спросите в деканате, как это сделать."
+    : " Спросите преподавателя семинаров, когда пересдача.";
+  const closes = d.final ? ` Долг по срезам закроет сданный ${d.final.kind === "CREDIT" ? "зачёт" : "экзамен"}.` : "";
+  const fixed =
+    issues.checkpoints.length > 0 && !issues.final && d.average && !isFailingLetter(d.average.letter)
+      ? ` Средний уже выше порога.${closes}`
+      : issues.checkpoints.length > 0 && !issues.final
+        ? closes
+        : "";
+  return `${text[0]!.toUpperCase()}${text.slice(1)}.${ask}${fixed}`;
 }

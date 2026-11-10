@@ -3,8 +3,8 @@ import { db } from "@/lib/db";
 import type { StudentContext, TeacherContext } from "@/lib/auth/guards";
 import type { GradeKind, Prisma } from "@/lib/generated/prisma/client";
 import { gradeNotification } from "@/lib/grades/notification";
-import { letterFor, overallAverage, scored, scoredAverage, type GradeLetter, type ScoredGrade } from "@/lib/grades/scale";
-import { isFailingLetter, overallFromCheckpoints } from "@/lib/grades/stats";
+import { overallAverage, scored, scoredAverage, type GradeLetter, type ScoredGrade } from "@/lib/grades/scale";
+import { hasFailing, overallFromCheckpoints } from "@/lib/grades/stats";
 import {
   CHECKPOINTS,
   CHECKPOINT_NUMBERS,
@@ -79,7 +79,10 @@ export type MyGrades = {
     /** Выставлено срезов из возможных (дисциплины × 3) */
     checkpointsGraded: number;
     checkpointsTotal: number;
-    /** Неудовлетворительных оценок (FX/F за срезы и экзамен, «не зачтено») */
+    /**
+     * Дисциплин с непогашенным долгом: FX/F за срез, пока итоговый контроль не сдан, или проваленный
+     * итоговый контроль (экзамен ниже 60, «не зачтено»). Правило — hasFailing из lib/grades/stats.ts
+     */
     failing: number;
     /** Идущий срез по сроку (1–3) или null после срока 3-го */
     currentCheckpoint: CheckpointNo | null;
@@ -169,9 +172,6 @@ function finalResultOf(rows: GradeRow[], final: FinalControl | null): FinalResul
 function finalOf(a: { finalKind: "EXAM" | "CREDIT" | null; finalDate: Date | null }): FinalControl | null {
   return a.finalKind ? { kind: a.finalKind, date: a.finalDate ? dbDateToIso(a.finalDate) : null } : null;
 }
-
-const isFailing = (r: FinalResult | GradeCell): boolean =>
-  !!r && ("passed" in r ? !r.passed : r.letter === "FX" || r.letter === "F");
 
 const byRu = (a: string, b: string) => a.localeCompare(b, "ru");
 
@@ -263,7 +263,7 @@ export async function getMyGrades(ctx: StudentContext, semester?: number | strin
     summary: {
       checkpointsGraded: list.reduce((n, d) => n + d.checkpoints.filter(Boolean).length, 0),
       checkpointsTotal: list.length * CHECKPOINT_NUMBERS.length,
-      failing: list.reduce((n, d) => n + d.checkpoints.filter(isFailing).length + (isFailing(d.finalResult) ? 1 : 0), 0),
+      failing: list.filter(hasFailing).length,
       currentCheckpoint: currentCheckpoint(today),
       nextFinal: next ? { disciplineId: next.disciplineId, discipline: next.discipline, kind: next.final!.kind, date: next.final!.date! } : null,
     },
@@ -285,7 +285,7 @@ export type LatestGrade = {
 export type MyGradesDigest = {
   /** Итоговый балл текущего семестра («среднее из средних») или null — оценок нет */
   overall: ScoredGrade | null;
-  /** Дисциплин, где есть FX/F или «не зачтено» */
+  /** Дисциплин с непогашенным долгом — то же правило и то же число, что summary.failing в getMyGrades */
   failingDisciplines: number;
   /** Последние выставленные оценки, новые сверху */
   latest: LatestGrade[];
@@ -312,14 +312,19 @@ export async function getMyGradesDigest(ctx: StudentContext, limit = 2): Promise
   const checkpoints = rows.flatMap((r) =>
     r.kind === "CHECKPOINT" && r.points != null ? [{ disciplineId: r.disciplineId, points: r.points }] : [],
   );
-  const failing = new Set(
-    rows
-      .filter((r) => (r.kind === "CREDIT" ? r.passed === false : r.points != null && isFailingLetter(letterFor(r.points))))
-      .map((r) => r.disciplineId),
-  );
+  // Долг считаем по дисциплине целиком (hasFailing): сданный экзамен/зачёт гасит FX/F за срезы
+  const byDiscipline = new Map<string, typeof rows>();
+  for (const r of rows) byDiscipline.set(r.disciplineId, [...(byDiscipline.get(r.disciplineId) ?? []), r]);
+  const failing = [...byDiscipline.values()].filter((list) => {
+    const final = list.find((r) => r.kind !== "CHECKPOINT");
+    return hasFailing({
+      checkpoints: checkpointsOf(list),
+      finalResult: final ? finalResultOf(list, { kind: final.kind as FinalControl["kind"], date: null }) : null,
+    });
+  });
   return {
     overall: overallFromCheckpoints(checkpoints),
-    failingDisciplines: failing.size,
+    failingDisciplines: failing.length,
     latest: rows.slice(0, Math.max(0, limit)).map((r) => ({
       disciplineId: r.disciplineId,
       discipline: r.discipline.name,

@@ -16,18 +16,52 @@ export type DisciplineLike = { checkpoints: readonly Cell[]; finalResult: Final 
 
 export const isFailingLetter = (letter: GradeLetter): boolean => scaleEntry(letter).failing;
 
-/** Неудовлетворительные оценки дисциплины: номера срезов с FX/F и «провален ли» итоговый контроль. */
-export function disciplineIssues(d: DisciplineLike): { checkpoints: CheckpointNo[]; final: boolean } {
-  const checkpoints = d.checkpoints.flatMap((c, i) => (c && isFailingLetter(c.letter) ? [(i + 1) as CheckpointNo] : []));
-  const f = d.finalResult;
-  const final = !!f && (f.kind === "CREDIT" ? !f.passed : isFailingLetter(f.letter));
-  return { checkpoints, final };
+/** Итоговый контроль сдан: «зачтено» или экзамен не ниже 60 баллов (E и выше). */
+export const finalPassed = (f: Final): boolean => !!f && (f.kind === "CREDIT" ? f.passed : !isFailingLetter(f.letter));
+
+export type DisciplineIssues = {
+  /** Срезы с FX/F, не закрытые итоговым контролем, — непогашенный долг */
+  checkpoints: CheckpointNo[];
+  /** Срезы с FX/F, закрытые сданным итоговым контролем (зачтено / экзамен ≥ 60), — долга нет */
+  settled: CheckpointNo[];
+  /** Итоговый контроль провален: «не зачтено» или экзамен ниже 60 */
+  final: boolean;
+};
+
+/**
+ * Неудовлетворительные оценки дисциплины. FX/F за срез — текущий контроль: если итоговый контроль
+ * сдан (зачтено или экзамен ≥ 60), долг по срезам погашен и дисциплина больше не «ниже порога».
+ */
+export function disciplineIssues(d: DisciplineLike): DisciplineIssues {
+  const failed = d.checkpoints.flatMap((c, i) => (c && isFailingLetter(c.letter) ? [(i + 1) as CheckpointNo] : []));
+  const passed = finalPassed(d.finalResult);
+  return {
+    checkpoints: passed ? [] : failed,
+    settled: passed ? failed : [],
+    final: !!d.finalResult && !passed,
+  };
 }
 
+/** Есть непогашенный долг: FX/F за срез без сданного итогового контроля или проваленный итоговый контроль. */
 export const hasFailing = (d: DisciplineLike): boolean => {
   const i = disciplineIssues(d);
   return i.checkpoints.length > 0 || i.final;
 };
+
+/**
+ * Худшая непогашенная оценка дисциплины: F («нужно повторить курс») важнее FX («можно пересдать»);
+ * «не зачтено» — как FX: зачёт можно пересдать. null — долга нет.
+ */
+export function worstFailingLetter(d: DisciplineLike): "FX" | "F" | null {
+  const i = disciplineIssues(d);
+  const letters: GradeLetter[] = i.checkpoints.map((no) => d.checkpoints[no - 1]!.letter);
+  if (i.final && d.finalResult) letters.push(d.finalResult.kind === "EXAM" ? d.finalResult.letter : "FX");
+  if (letters.includes("F")) return "F";
+  return letters.includes("FX") ? "FX" : null;
+}
+
+/** Что означает долг (как в шкале): FX — «можно пересдать», F — «нужно повторить курс». */
+export const FAILING_ADVICE = { FX: "можно пересдать", F: "нужно повторить курс" } as const;
 
 export type CheckpointStat = {
   no: CheckpointNo;
