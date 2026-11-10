@@ -42,10 +42,15 @@ describe("схема campus-map.json", () => {
     expect(parsed.data!.rooms.length).toBeGreaterThan(200);
   });
 
-  it("допускает лишние поля", () => {
-    const d = { ...valid(), version: 2 };
-    d.rooms[0] = { ...d.rooms[0], color: "red" } as typeof room;
-    expect(campusMapSchema.safeParse(d).success).toBe(true);
+  it("допускает лишние поля, но не передаёт их дальше (в браузер уходят только известные)", () => {
+    const d = { ...valid(), version: 2, secret: "внутренняя заметка" };
+    d.rooms[0] = { ...d.rooms[0], color: "red", note: "<script>" } as typeof room;
+    d.buildings[0] = { ...d.buildings[0], owner: "x" } as typeof building;
+    const parsed = campusMapSchema.safeParse(d);
+    expect(parsed.success).toBe(true);
+    expect(Object.keys(parsed.data!).sort()).toEqual(["buildings", "rooms"]);
+    expect(Object.keys(parsed.data!.rooms[0]!).sort()).toEqual(["bookable", "building", "capacity", "floor", "number", "purpose", "type", "wing"]);
+    expect(Object.keys(parsed.data!.buildings[0]!).sort()).toEqual(["abbr", "address", "floors", "id", "name", "scheme", "wings"]);
   });
 
   const broken: [string, (d: ReturnType<typeof valid>) => unknown][] = [
