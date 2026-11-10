@@ -12,11 +12,11 @@
  */
 import "dotenv/config";
 import path from "node:path";
-import { createPrismaClient } from "../lib/prisma-client";
-import { DEFAULT_DEMO_PASSWORD, ImportError, importUniversityData, testLoginsFromEnv } from "../lib/university-data/import";
-import { loadUniversityData, universityDataDir } from "../lib/university-data/load";
-import { formatIssue } from "../lib/university-data/validate";
-import { plural } from "../lib/utils";
+import { createPrismaClient } from "@/lib/prisma-client";
+import { DEFAULT_DEMO_PASSWORD, ImportError, importUniversityData, testLoginsFromEnv } from "@/lib/university-data/import";
+import { loadUniversityData, universityDataDir } from "@/lib/university-data/load";
+import { formatIssue } from "@/lib/university-data/validate";
+import { plural } from "@/lib/utils";
 
 const MAX_ERRORS_SHOWN = 30;
 const MAX_WARNINGS_SHOWN = 10;
@@ -58,7 +58,8 @@ async function main(): Promise<number> {
   console.log(
     `\nФайлы в порядке:\n` +
       `  students.csv     ${n(d.students.length)} студентов, факультетов ${d.faculties.length}, групп ${d.groups.length}\n` +
-      `  schedule.csv     ${n(d.scheduleRows)} ${plural(d.scheduleRows, ["строка", "строки", "строк"])} → ${n(d.lessons.length)} занятий, преподавателей ${d.teachers.length}, дисциплин ${d.disciplines.length}\n` +
+      `  schedule.csv     ${n(d.scheduleRows)} ${plural(d.scheduleRows, ["строка", "строки", "строк"])} → ` +
+      `${n(d.lessons.length)} занятий, преподавателей ${d.teachers.length}, дисциплин ${d.disciplines.length}\n` +
       `  campus-map.json  корпусов ${d.buildings.filter((b) => b.onMap).length}, аудиторий ${d.rooms.filter((r) => r.onMap).length}`,
   );
   if (checkOnly) {
@@ -83,7 +84,10 @@ async function main(): Promise<number> {
         `  Занятий: ${n(summary.lessons)} (связей «занятие — группа» ${n(summary.lessonGroups)})`,
     );
     if (summary.resetTestStudents > 0) {
-      console.log(`  Бывшим тестовым студентам выдан новый случайный пароль: ${n(summary.resetTestStudents)} (демо-пароль у них больше не работает)`);
+      console.log(
+        `  Бывшим тестовым студентам выдан новый случайный пароль: ${n(summary.resetTestStudents)} ` +
+          "(демо-пароль у них больше не работает)",
+      );
     }
     if (summary.warnings.length > 0) {
       console.log(`\nПроверьте (${summary.warnings.length}):`);
@@ -97,7 +101,8 @@ async function main(): Promise<number> {
     for (const s of summary.staff) console.log(`  деканат  ${s.login.padEnd(30)} ${s.fullName}, ${s.faculty}`);
     console.log(process.env.DEMO_PASSWORD ? "  Пароль: из DEMO_PASSWORD" : `  Пароль: ${DEFAULT_DEMO_PASSWORD}`);
 
-    console.log(`\nЛогины и пароли (${n(summary.credentialsRows)} ${plural(summary.credentialsRows, ["строка", "строки", "строк"])}) записаны в ${summary.credentialsPath}`);
+    const rows = `${n(summary.credentialsRows)} ${plural(summary.credentialsRows, ["строка", "строки", "строк"])}`;
+    console.log(`\nЛогины и пароли (${rows}) записаны в ${summary.credentialsPath}`);
     console.log("  ⚠ Файл содержит пароли: НЕ коммитьте его и не публикуйте. Он уже есть в .gitignore и .dockerignore.");
     return 0;
   } catch (e) {

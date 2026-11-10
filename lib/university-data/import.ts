@@ -11,9 +11,9 @@
  *   знают все посетители стенда.
  */
 import { randomUUID } from "node:crypto";
-import { hashPassword, verifyPassword } from "../auth/password";
-import { Prisma, type PrismaClient } from "../generated/prisma/client";
-import { isoDateToDb, moscowDateTime } from "../moscow-time";
+import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import { Prisma, type PrismaClient } from "@/lib/generated/prisma/client";
+import { isoDateToDb, moscowDateTime } from "@/lib/moscow-time";
 import {
   ROLE_STAFF,
   ROLE_STUDENT,
@@ -25,8 +25,8 @@ import {
   recoverCredentialsTemp,
   writeCredentialsTemp,
   type CredentialRow,
-} from "./credentials";
-import { pickTestStudents, staffLoginForFaculty, type StudentData, type UniversityDataset } from "./validate";
+} from "@/lib/university-data/credentials";
+import { pickTestStudents, staffLoginForFaculty, type StudentData, type UniversityDataset } from "@/lib/university-data/validate";
 
 export const DEFAULT_DEMO_PASSWORD = "Hogwarts2026";
 
@@ -133,7 +133,10 @@ export async function importUniversityData(
       return !!user && (await verifyPassword(user.passwordHash, password));
     });
     if (recovery?.brokenFile) {
-      warnings.push(`Файл паролей прошлого импорта (${options.credentialsPath}.tmp) повреждён и переименован в ${recovery.brokenFile} — проверьте его вручную.`);
+      warnings.push(
+        `Файл паролей прошлого импорта (${options.credentialsPath}.tmp) повреждён и переименован ` +
+          `в ${recovery.brokenFile} — проверьте его вручную.`,
+      );
     } else if (recovery) {
       warnings.push(
         `Найден файл паролей незавершённого прошлого импорта (${options.credentialsPath}.tmp): ` +
@@ -452,7 +455,13 @@ export async function importUniversityData(
         await tx.user.updateMany({ where: { role: "STUDENT", isDemo: true }, data: { isDemo: false } });
         for (const s of testStudents) {
           await tx.user.update({ where: { login: s.login }, data: { passwordHash: testHash.get(s.login)!, isDemo: true } });
-          credentials.set(s.login, { login: s.login, fullName: fio(s), email: s.email, role: ROLE_TEST_STUDENT, password: options.demoPassword });
+          credentials.set(s.login, {
+            login: s.login,
+            fullName: fio(s),
+            email: s.email,
+            role: ROLE_TEST_STUDENT,
+            password: options.demoPassword,
+          });
         }
         // Строка «тестовый» без тестового аккаунта в базе — с недействительным демо-паролем: убираем
         for (const row of [...credentials.values()]) {

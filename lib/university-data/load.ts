@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { CAMPUS_MAP_MAX_BYTES } from "../campus-map/schema";
+import { CAMPUS_MAP_MAX_BYTES } from "@/lib/campus-map/schema";
 import {
   MAP_FILE,
   SCHEDULE_FILE,
@@ -8,7 +8,7 @@ import {
   validateUniversityData,
   type Issue,
   type ValidationResult,
-} from "./validate";
+} from "@/lib/university-data/validate";
 
 /** Папка с файлами вуза по умолчанию (относительно корня репозитория). */
 export const DEFAULT_DATA_DIR = "data/university";

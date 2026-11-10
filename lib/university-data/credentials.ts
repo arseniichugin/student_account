@@ -5,7 +5,7 @@
  */
 import { randomInt } from "node:crypto";
 import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { CsvSyntaxError, parseCsv, toCsv } from "./csv";
+import { CsvSyntaxError, parseCsv, toCsv } from "@/lib/university-data/csv";
 
 /** Без похожих символов: нет 0/O/o, 1/l/I/i. */
 const ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";

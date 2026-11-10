@@ -75,7 +75,12 @@ export default async function SchedulePage({ searchParams }: PageProps<"/schedul
         : null;
 
   const { from, to } = view === "week" ? weekRange(date) : { from: date, to: date };
-  const [faculties, loaded] = await Promise.all([listFaculties(ctx), load(ctx, target, from, to, { date: date === today ? null : date, view })]);
+  // Дата в ссылках: «сегодня» не пишем в адрес, чтобы ссылка оставалась «текущей».
+  const linkDate = date === today ? null : date;
+  const [faculties, loaded] = await Promise.all([
+    listFaculties(ctx),
+    load(ctx, target, from, to, { date: linkDate, view }),
+  ]);
 
   const href = (d: string, v: ScheduleView = view) => scheduleHref({ target, date: d === today ? null : d, view: v });
   const step = view === "week" ? 7 : 1;
@@ -89,11 +94,14 @@ export default async function SchedulePage({ searchParams }: PageProps<"/schedul
       </div>
 
       <Card>
-        <ScheduleSearch faculties={faculties.map((f) => ({ id: f.id, name: f.name }))} date={date === today ? null : date} view={view} />
+        <ScheduleSearch faculties={faculties.map((f) => ({ id: f.id, name: f.name }))} date={linkDate} view={view} />
       </Card>
 
       {target && ctx.role === "STUDENT" && (
-        <Link href={scheduleHref({ date: date === today ? null : date, view })} className={buttonVariants({ variant: "ghost", className: "-ml-3" })}>
+        <Link
+          href={scheduleHref({ date: linkDate, view })}
+          className={buttonVariants({ variant: "ghost", className: "-ml-3" })}
+        >
           <ArrowLeft className="size-4" aria-hidden />
           Моё расписание
         </Link>
@@ -135,7 +143,10 @@ export default async function SchedulePage({ searchParams }: PageProps<"/schedul
           {loaded.groups.length === 0 ? (
             <p className="mt-3 text-sm text-muted">У факультета пока нет групп.</p>
           ) : (
-            <GroupsByCourse groups={loaded.groups} hrefOf={(id) => scheduleHref({ target: { type: "group", id }, date: date === today ? null : date, view })} />
+            <GroupsByCourse
+              groups={loaded.groups}
+              hrefOf={(id) => scheduleHref({ target: { type: "group", id }, date: linkDate, view })}
+            />
           )}
         </Card>
       )}

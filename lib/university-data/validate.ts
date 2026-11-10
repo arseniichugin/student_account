@@ -7,10 +7,10 @@
  * Формат файлов описан в data/university/README.md.
  */
 import { z } from "zod";
-import { CAMPUS_MAP_FILE, formatIssuePath, parseCampusMap, type CampusMapIssue } from "../campus-map/schema";
-import { isIsoDate } from "../moscow-time";
-import { CsvSyntaxError, parseCsv, type CsvTable } from "./csv";
-import { translit } from "./translit";
+import { CAMPUS_MAP_FILE, formatIssuePath, parseCampusMap, type CampusMapIssue } from "@/lib/campus-map/schema";
+import { isIsoDate } from "@/lib/moscow-time";
+import { CsvSyntaxError, parseCsv, type CsvTable } from "@/lib/university-data/csv";
+import { translit } from "@/lib/university-data/translit";
 
 export const STUDENTS_FILE = "students.csv";
 export const SCHEDULE_FILE = "schedule.csv";
@@ -216,7 +216,9 @@ function checkRowWidth(file: string, table: CsvTable, issues: Issues) {
       issues.error({
         file,
         line: r.line,
-        message: `значений ${r.values.length}, а колонок в заголовке ${table.headers.length} — проверьте разделитель «${table.delimiter === "\t" ? "табуляция" : table.delimiter}» и кавычки`,
+        message:
+          `значений ${r.values.length}, а колонок в заголовке ${table.headers.length} — ` +
+          `проверьте разделитель «${table.delimiter === "\t" ? "табуляция" : table.delimiter}» и кавычки`,
       });
     }
   }
@@ -240,6 +242,7 @@ function zodIssues(
 const required = () => z.string().trim().min(1, "пустое значение, а колонка обязательная");
 const optional = () => z.string().trim();
 const shown = (v: unknown) => `«${String(v)}»`;
+const groupRole = (as: "academic" | "language") => (as === "academic" ? "академическая" : "языковая");
 
 function compareIds(a: string, b: string): number {
   const na = Number(a);
@@ -421,7 +424,10 @@ function validateSchedule(text: string, issues: Issues): ParsedSchedule | null {
         issues.error({
           file,
           line: rec.line,
-          message: `занятие lessonOid=${row.lessonOid} уже было в строке ${first.line}, но колонка «${diff}» отличается: ${shown(first.row[diff])} и ${shown(row[diff])}. Строки одного занятия (лекции потока) должны совпадать во всём, кроме группы`,
+          message:
+            `занятие lessonOid=${row.lessonOid} уже было в строке ${first.line}, но колонка «${diff}» отличается: ` +
+            `${shown(first.row[diff])} и ${shown(row[diff])}. ` +
+            "Строки одного занятия (лекции потока) должны совпадать во всём, кроме группы",
         });
         continue;
       }
@@ -471,7 +477,8 @@ const studentRowSchema = z.object({
     .refine((v) => EMAIL_RE.test(v), { error: (iss) => `${shown(iss.input)} не адрес электронной почты` })
     .refine((v) => LOGIN_RE.test(v.split("@")[0]!.toLowerCase()), {
       error: (iss) =>
-        `из адреса ${shown(iss.input)} не получается логин: до «@» допустимы латинские буквы, цифры, точка, дефис и подчёркивание (до 64 символов)`,
+        `из адреса ${shown(iss.input)} не получается логин: ` +
+        "до «@» допустимы латинские буквы, цифры, точка, дефис и подчёркивание (до 64 символов)",
     }),
   recordBookNo: required().max(64, "слишком длинное значение"),
   facultyName: required(),
@@ -544,7 +551,10 @@ function validateStudents(text: string, scheduleGroups: Set<string> | null, issu
     const fac = facultyNames.get(r.facultyCode);
     if (!fac) facultyNames.set(r.facultyCode, { name: r.facultyName, line });
     else if (fac.name !== r.facultyName) {
-      err("facultyName", `у кода ${shown(r.facultyCode)} в строке ${fac.line} указан факультет ${shown(fac.name)}, а здесь ${shown(r.facultyName)}`);
+      err(
+        "facultyName",
+        `у кода ${shown(r.facultyCode)} в строке ${fac.line} указан факультет ${shown(fac.name)}, а здесь ${shown(r.facultyName)}`,
+      );
     }
 
     const course = Number(r.course);
@@ -568,7 +578,7 @@ function validateStudents(text: string, scheduleGroups: Set<string> | null, issu
       else if (used.as !== as) {
         err(
           key,
-          `группа ${shown(name)} в строке ${used.line} указана как ${used.as === "academic" ? "академическая" : "языковая"}, а здесь — как ${as === "academic" ? "академическая" : "языковая"}`,
+          `группа ${shown(name)} в строке ${used.line} указана как ${groupRole(used.as)}, а здесь — как ${groupRole(as)}`,
         );
       }
     }
@@ -577,7 +587,8 @@ function validateStudents(text: string, scheduleGroups: Set<string> | null, issu
     else if (acad.course !== course || acad.facultyCode !== r.facultyCode) {
       err(
         "academicGroup",
-        `у группы ${shown(r.academicGroup)} в строке ${acad.line} курс ${acad.course} и факультет ${shown(acad.facultyCode)}, а здесь курс ${course} и факультет ${shown(r.facultyCode)}`,
+        `у группы ${shown(r.academicGroup)} в строке ${acad.line} курс ${acad.course} и факультет ${shown(acad.facultyCode)}, ` +
+          `а здесь курс ${course} и факультет ${shown(r.facultyCode)}`,
       );
     }
 
@@ -607,7 +618,9 @@ function validateStudents(text: string, scheduleGroups: Set<string> | null, issu
     if (prev) {
       issues.error({
         file,
-        message: `коды факультетов ${shown(prev)} и ${shown(code)} дают одинаковый логин деканата ${shown(login)} — сделайте коды различимыми`,
+        message:
+          `коды факультетов ${shown(prev)} и ${shown(code)} дают одинаковый логин деканата ${shown(login)} — ` +
+          "сделайте коды различимыми",
       });
     }
     staffLogins.set(login, code);
@@ -778,10 +791,12 @@ function buildDataset(
   if (withoutStudents.length > 0) {
     issues.warn({
       file: SCHEDULE_FILE,
-      message: `${withoutStudents.length} групп(ы) из расписания нет ни у одного студента — они сохранятся и будут видны в поиске расписания: ${withoutStudents
-        .slice(0, 10)
-        .map((g) => g.name)
-        .join(", ")}${withoutStudents.length > 10 ? "…" : ""}`,
+      message:
+        `${withoutStudents.length} групп(ы) из расписания нет ни у одного студента — ` +
+        `они сохранятся и будут видны в поиске расписания: ${withoutStudents
+          .slice(0, 10)
+          .map((g) => g.name)
+          .join(", ")}${withoutStudents.length > 10 ? "…" : ""}`,
     });
   }
 
@@ -894,7 +909,12 @@ function buildDataset(
     issues.warn({ file: MAP_FILE, message: "файла нет — корпуса и аудитории будут взяты только из расписания, без этажей и вместимости" });
   }
   if (missingRooms.size > 0) {
-    issues.warn({ file: SCHEDULE_FILE, message: `${missingRooms.size} аудиторий из расписания нет на карте кампуса (занятия загрузятся, но без схемы проезда): ${list(missingRooms)}` });
+    issues.warn({
+      file: SCHEDULE_FILE,
+      message:
+        `${missingRooms.size} аудиторий из расписания нет на карте кампуса ` +
+        `(занятия загрузятся, но без схемы проезда): ${list(missingRooms)}`,
+    });
   }
   if (missingBuildings.size > 0) {
     issues.warn({ file: SCHEDULE_FILE, message: `корпусов нет на карте кампуса: ${list(missingBuildings)}` });
@@ -932,7 +952,8 @@ export function validateUniversityData(files: UniversityFiles): ValidationResult
   const map = files.map === null ? null : validateMap(files.map, issues);
 
   if (issues.errorCount > 0 || !schedule || !studentsResult || (files.map !== null && !map)) {
-    return { ok: false, errors: issues.errors, errorCount: Math.max(issues.errorCount, 1), warnings: issues.warnings, warningCount: issues.warningCount };
+    const { errors, warnings, warningCount } = issues;
+    return { ok: false, errors, errorCount: Math.max(issues.errorCount, 1), warnings, warningCount };
   }
   const data = buildDataset(schedule, studentsResult.students, studentsResult.facultyNames, map, issues);
   return { ok: true, data, warnings: issues.warnings, warningCount: issues.warningCount };

@@ -9,10 +9,10 @@
  * Запуск: npm run db:seed (после npm run data:import). Повторный запуск даёт тот же результат.
  */
 import "dotenv/config";
-import { createPrismaClient } from "../lib/prisma-client";
-import type { GradeKind, NotificationType, RequestStatus } from "../lib/generated/prisma/client";
-import { dbDateToIso, moscowDateTime } from "../lib/moscow-time";
-import { formatDayMonthLong } from "../lib/schedule/dates";
+import type { GradeKind, NotificationType, RequestStatus } from "@/lib/generated/prisma/client";
+import { dbDateToIso, moscowDateTime } from "@/lib/moscow-time";
+import { createPrismaClient } from "@/lib/prisma-client";
+import { formatDayMonthLong } from "@/lib/schedule/dates";
 
 const db = createPrismaClient();
 
@@ -38,7 +38,10 @@ function pick<T>(rand: () => number, items: readonly T[]): T {
 
 /** Дата и время по Москве. */
 const msk = (y: number, m: number, d: number, hh = 12, mm = 0) =>
-  moscowDateTime(`${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`, `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`);
+  moscowDateTime(`${y}-${pad2(m)}-${pad2(d)}`, `${pad2(hh)}:${pad2(mm)}`);
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
 
 /** «3 ноября» — тот же форматтер, что на экранах расписания. */
 const ruDate = formatDayMonthLong;
@@ -135,7 +138,8 @@ async function main() {
       groupDisciplines.set(groupId, m);
     }
   }
-  const disciplinesOf = (groupId: string) => [...(groupDisciplines.get(groupId)?.keys() ?? [])].sort((a, b) => disciplines.get(a)!.localeCompare(disciplines.get(b)!, "ru"));
+  const disciplinesOf = (groupId: string) =>
+    [...(groupDisciplines.get(groupId)?.keys() ?? [])].sort((a, b) => disciplines.get(a)!.localeCompare(disciplines.get(b)!, "ru"));
   /** Дисциплины академических групп факультета на курсе — для оценок прошлых лет. */
   const yearDisciplines = new Map<string, string[]>();
   for (const g of groups) {
@@ -171,7 +175,9 @@ async function main() {
   // ─── Оценки ───────────────────────────────────────────────────────
   console.log("Оценки…");
   // Студент с «долгом» — второй тестовый (у него же отклонённая выписка) и ~4% остальных.
-  const debtors = new Set(students.filter((s) => (testStudents[1] ? s.id === testStudents[1].id : false) || (!s.user.isDemo && hash(s.externalId) % 25 === 0)).map((s) => s.id));
+  const isDebtor = (s: (typeof students)[number]) =>
+    (testStudents[1] ? s.id === testStudents[1].id : false) || (!s.user.isDemo && hash(s.externalId) % 25 === 0);
+  const debtors = new Set(students.filter(isDebtor).map((s) => s.id));
   const debtSubject = new Map<string, string>();
   const grades: {
     studentId: string;
@@ -266,14 +272,35 @@ async function main() {
   const [t1, t2, t3] = testStudents;
   if (t1) {
     requests.push(
-      { studentId: t1.id, code: "STUDY_CERT", status: "READY", destination: "По месту работы", staffComment: `Справка готова. Заберите ${deanRoom(t1.facultyId)} (пн–пт, 10:00–16:00).`, createdAt: msk(2026, 11, 3, 11, 20) },
-      { studentId: t1.id, code: "SCHOLARSHIP_CERT", status: "IN_PROGRESS", destination: "Отдел социальной защиты", comment: "За сентябрь–октябрь", createdAt: msk(2026, 11, 6, 15, 5) },
+      {
+        studentId: t1.id,
+        code: "STUDY_CERT",
+        status: "READY",
+        destination: "По месту работы",
+        staffComment: `Справка готова. Заберите ${deanRoom(t1.facultyId)} (пн–пт, 10:00–16:00).`,
+        createdAt: msk(2026, 11, 3, 11, 20),
+      },
+      {
+        studentId: t1.id,
+        code: "SCHOLARSHIP_CERT",
+        status: "IN_PROGRESS",
+        destination: "Отдел социальной защиты",
+        comment: "За сентябрь–октябрь",
+        createdAt: msk(2026, 11, 6, 15, 5),
+      },
     );
   }
   if (t2) {
     const debt = debtSubject.get(t2.id);
     requests.push(
-      { studentId: t2.id, code: "MILITARY_CERT", status: "ISSUED", destination: "Военный комиссариат", staffComment: "Выдана 22.10.", createdAt: msk(2026, 10, 19, 9, 40) },
+      {
+        studentId: t2.id,
+        code: "MILITARY_CERT",
+        status: "ISSUED",
+        destination: "Военный комиссариат",
+        staffComment: "Выдана 22.10.",
+        createdAt: msk(2026, 10, 19, 9, 40),
+      },
       {
         studentId: t2.id,
         code: "TRANSCRIPT",
@@ -285,13 +312,27 @@ async function main() {
           : "Есть академическая задолженность. Выписка будет доступна после пересдачи.",
         createdAt: msk(2026, 11, 2, 13, 0),
       },
-      { studentId: t2.id, code: "STUDY_CERT", status: "SUBMITTED", destination: "Для оформления социальной карты", createdAt: msk(2026, 11, 7, 18, 30) },
+      {
+        studentId: t2.id,
+        code: "STUDY_CERT",
+        status: "SUBMITTED",
+        destination: "Для оформления социальной карты",
+        createdAt: msk(2026, 11, 7, 18, 30),
+      },
     );
   }
   if (t3) {
     requests.push(
       { studentId: t3.id, code: "STUDY_CERT", status: "SUBMITTED", destination: "В банк", createdAt: msk(2026, 11, 8, 10, 15) },
-      { studentId: t3.id, code: "TRANSCRIPT", status: "READY", destination: "Для программы обмена", copies: 2, staffComment: `Выписка готова. Заберите ${deanRoom(t3.facultyId)}.`, createdAt: msk(2026, 11, 4, 16, 45) },
+      {
+        studentId: t3.id,
+        code: "TRANSCRIPT",
+        status: "READY",
+        destination: "Для программы обмена",
+        copies: 2,
+        staffComment: `Выписка готова. Заберите ${deanRoom(t3.facultyId)}.`,
+        createdAt: msk(2026, 11, 4, 16, 45),
+      },
     );
   }
   // Очередь каждого деканата: ещё по 4 заявки от обычных студентов факультета
@@ -355,7 +396,12 @@ async function main() {
       });
     });
     if (g.kind === "ACADEMIC" && g.course === 1) {
-      deadlines.push({ groupId: g.id, disciplineId: null, title: "Сдать фото для студенческого билета в деканат", dueAt: msk(2026, 11, 20, 17, 0) });
+      deadlines.push({
+        groupId: g.id,
+        disciplineId: null,
+        title: "Сдать фото для студенческого билета в деканат",
+        dueAt: msk(2026, 11, 20, 17, 0),
+      });
     }
   }
   await db.deadline.createMany({ data: deadlines });
@@ -372,7 +418,15 @@ async function main() {
     if (exam._min.date && exam._max.date) sessionDates.set(f.id, { from: dbDateToIso(exam._min.date), to: dbDateToIso(exam._max.date) });
   }
   const courses = [...new Set(students.map((s) => s.course))].sort((a, b) => a - b);
-  const announcements: { authorId: string; title: string; body: string; facultyId?: string | null; course?: number | null; publishedAt: Date }[] = [];
+  type AnnouncementSeed = {
+    authorId: string;
+    title: string;
+    body: string;
+    facultyId?: string | null;
+    course?: number | null;
+    publishedAt: Date;
+  };
+  const announcements: AnnouncementSeed[] = [];
   for (const f of faculties) {
     const author = staffUserByFaculty.get(f.id);
     if (!author) continue;
@@ -381,7 +435,8 @@ async function main() {
       authorId: author,
       title: "График зимней сессии опубликован",
       body: session
-        ? `Экзамены пройдут с ${ruDate(session.from)} по ${ruDate(session.to)}. Консультации — за 1–2 дня до экзамена, время и аудитории смотрите в расписании.`
+        ? `Экзамены пройдут с ${ruDate(session.from)} по ${ruDate(session.to)}. ` +
+          "Консультации — за 1–2 дня до экзамена, время и аудитории смотрите в расписании."
         : "Расписание экзаменов появится в кабинете за месяц до начала сессии.",
       facultyId: f.id,
       publishedAt: msk(2026, 11, 6, 12, 0),
@@ -401,7 +456,9 @@ async function main() {
       announcements.push({
         authorId: author,
         title: "Выбор темы выпускной работы",
-        body: `Студенты ${last} курса: до 10 декабря выберите тему и научного руководителя. Список тем — на кафедрах, вопросы — в деканате.`,
+        body:
+          `Студенты ${last} курса: до 10 декабря выберите тему и научного руководителя. ` +
+          "Список тем — на кафедрах, вопросы — в деканате.",
         facultyId: f.id,
         course: last,
         publishedAt: msk(2026, 11, 5, 10, 0),
@@ -421,7 +478,16 @@ async function main() {
 
   // ─── Уведомления ──────────────────────────────────────────────────
   console.log("Уведомления…");
-  const notifications: { userId: string; type: NotificationType; title: string; body: string; link?: string | null; createdAt: Date; readAt?: Date | null }[] = [];
+  type NotificationSeed = {
+    userId: string;
+    type: NotificationType;
+    title: string;
+    body: string;
+    link?: string | null;
+    createdAt: Date;
+    readAt?: Date | null;
+  };
+  const notifications: NotificationSeed[] = [];
   const studentById = new Map(students.map((s) => [s.id, s]));
   const typeName = new Map(REQUEST_TYPES.map((t) => [t.code, t.name]));
   for (const r of createdRequests) {
@@ -451,7 +517,11 @@ async function main() {
       });
     }
     const change = await db.lesson.findFirst({
-      where: { status: { not: "NORMAL" }, date: { gte: new Date("2026-11-09T00:00:00Z") }, groups: { some: { groupId: { in: myGroups } } } },
+      where: {
+        status: { not: "NORMAL" },
+        date: { gte: new Date("2026-11-09T00:00:00Z") },
+        groups: { some: { groupId: { in: myGroups } } },
+      },
       orderBy: [{ date: "asc" }, { startTime: "asc" }],
       select: { date: true, startTime: true, status: true, note: true, discipline: { select: { name: true } } },
     });
