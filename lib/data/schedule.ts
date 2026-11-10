@@ -199,6 +199,14 @@ export async function listFaculties(ctx: UserContext): Promise<(FacultyOption & 
 }
 
 /**
+ * Prisma передаёт строку `contains` в ILIKE '%…%' как есть: «%» и «_» в запросе стали бы
+ * шаблоном («%» — «всё подряд»). Экранируем их и сам «\» — escape-символ LIKE в PostgreSQL по умолчанию.
+ */
+export function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
+/**
  * Поиск по группам и преподавателям (без студентов!). Регистр не важен.
  * facultyId — только группы этого факультета и преподаватели, у которых есть занятия с ними.
  */
@@ -211,7 +219,7 @@ export async function searchScheduleTargets(
   if (q === "") return [];
   const limit = Math.min(Math.max(options.limit ?? 20, 1), 50);
   const facultyId = options.facultyId || undefined;
-  const contains = { contains: q, mode: "insensitive" as const };
+  const contains = { contains: escapeLike(q), mode: "insensitive" as const };
 
   const [groups, teachers] = await Promise.all([
     db.group.findMany({

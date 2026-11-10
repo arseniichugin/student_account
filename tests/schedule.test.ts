@@ -13,6 +13,7 @@ import { db } from "@/lib/db";
 import {
   MAX_RANGE_DAYS,
   ScheduleRangeError,
+  escapeLike,
   getGroupSchedule,
   getMyScheduleForDate,
   getMyScheduleForRange,
@@ -156,6 +157,28 @@ describe("Поиск и открытое расписание", () => {
     const none = await searchScheduleTargets(anyUser, academic, { facultyId: other.id });
     expect(none.some((r) => r.type === "group" && r.name === academic)).toBe(false);
     expect(await searchScheduleTargets(anyUser, "   ")).toEqual([]);
+  });
+
+  it("«%», «_» и «\\» в поиске — обычные символы, а не шаблон LIKE", async () => {
+    expect(escapeLike("50%_a\\b")).toBe("50\\%\\_a\\\\b");
+    // Без экранирования «%» и «_» нашли бы все группы и всех преподавателей
+    expect(await searchScheduleTargets(anyUser, "%")).toEqual([]);
+    expect(await searchScheduleTargets(anyUser, "_")).toEqual([]);
+    expect(await searchScheduleTargets(anyUser, "\\")).toEqual([]);
+
+    const name = `Тест_поиска%100\\${Date.now()}`;
+    const g = await db.group.create({ data: { name, kind: "OTHER" }, select: { id: true } });
+    try {
+      for (const q of ["_поиска%100\\", "тест_ПОИСКА", "%100\\"]) {
+        expect((await searchScheduleTargets(anyUser, q)).map((r) => r.id)).toContain(g.id);
+      }
+      expect((await searchScheduleTargets(anyUser, "Тест%100")).map((r) => r.id)).not.toContain(g.id);
+    } finally {
+      await db.group.delete({ where: { id: g.id } });
+    }
+    // Обычный запрос с дефисом работает как раньше
+    const academic = scheduleRows.find((r) => /^\d-/.test(r["group"]!))!["group"]!;
+    expect((await searchScheduleTargets(anyUser, academic.slice(0, 4))).some((r) => r.name === academic)).toBe(true);
   });
 
   it("расписание группы и преподавателя совпадает с CSV", async () => {
