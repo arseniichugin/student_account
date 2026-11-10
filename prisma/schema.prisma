@@ -178,9 +178,9 @@ model Staff {
 // ─── Расписание (из schedule.csv и campus-map.json; при импорте заменяется целиком) ─
 
 model Teacher {
-  id        String    @id @default(cuid())
+  id        String   @id @default(cuid())
   /// lecturerOid из schedule.csv (если пуст — краткое ФИО)
-  oid       String    @unique
+  oid       String   @unique
   /// «Арсеньева П.Н.»
   shortName String
   /// «Арсеньева Полина Николаевна»
@@ -191,6 +191,9 @@ model Teacher {
   lessons   Lesson[]
 }
 
+/// Корпус. Страница карты читает campus-map.json напрямую (lib/campus-map/load.ts), а не эту таблицу;
+/// поля карты здесь (floors, wings, maxRoom, scheme) — копия для будущего API и проверок.
+/// Расписание берёт отсюда name и address.
 model Building {
   id      String   @id @default(cuid())
   /// id корпуса на карте («main») или, если корпуса нет на карте, его название из расписания
@@ -198,7 +201,7 @@ model Building {
   name    String   @unique
   abbr    String?
   address String?
-  /// Этажи, крылья и схема нумерации — для карты
+  /// Этажи, крылья и схема нумерации — копия из campus-map.json (сейчас не читаются)
   floors  Int[]
   wings   Json?
   maxRoom Int?
@@ -209,6 +212,8 @@ model Building {
   lessons Lesson[]
 }
 
+/// Аудитория. Карта читает campus-map.json напрямую; поля карты (type, capacity, wing, bookable) —
+/// копия для будущего API и проверок. Расписание берёт number и floor, seed — purpose («Деканат…»).
 model Room {
   id         String    @id @default(cuid())
   /// Номер — как в колонке auditorium расписания и на карте: «4144», «Манеж-1»
@@ -256,7 +261,8 @@ model Lesson {
   /// «09:00», «10:20» — по Москве
   startTime      String
   endTime        String
-  /// Те же моменты в UTC — для «следующей пары» и сортировки
+  /// Те же моменты в UTC — задел (импорт заполняет, но никто не читает): сейчас время пары
+  /// считается из date + startTime/endTime (lib/moscow-time.ts), сортировка — по date и startTime.
   startsAt       DateTime
   endsAt         DateTime
   pairStart      Int?
