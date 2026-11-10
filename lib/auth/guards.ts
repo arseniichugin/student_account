@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { cache } from "react";
 import { db } from "@/lib/db";
 import { getCurrentSession } from "@/lib/auth/session";
+import { HOME } from "@/lib/navigation";
 
 // «Контексты» — единственный способ сказать слою данных, ЧЬИ данные нужны.
 // Они создаются только здесь, из проверенной сессии. Брендированный тип
@@ -35,7 +36,7 @@ export type UserContext = {
 export const requireStudent = cache(async (): Promise<StudentContext> => {
   const session = await getCurrentSession();
   if (!session) redirect("/login");
-  if (session.user.role !== "STUDENT") redirect("/staff");
+  if (session.user.role !== "STUDENT") redirect(HOME.STAFF);
 
   const student = await db.student.findUnique({
     where: { userId: session.user.id },
@@ -50,7 +51,7 @@ export const requireStudent = cache(async (): Promise<StudentContext> => {
 export const requireStaff = cache(async (): Promise<StaffContext> => {
   const session = await getCurrentSession();
   if (!session) redirect("/login");
-  if (session.user.role !== "STAFF") redirect("/");
+  if (session.user.role !== "STAFF") redirect(HOME.STUDENT);
 
   const staff = await db.staff.findUnique({
     where: { userId: session.user.id },

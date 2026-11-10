@@ -1,9 +1,13 @@
 import "server-only";
+import { cache } from "react";
 import { db } from "@/lib/db";
 import type { StaffContext, StudentContext } from "@/lib/auth/guards";
 
+// cache() — один запрос к базе на HTTP-запрос: профиль нужен и оболочке (layout), и странице.
+// Ключ — объект контекста; requireStudent/requireStaff тоже в cache(), поэтому он один и тот же.
+
 /** Профиль текущего студента. id берётся только из контекста сессии. */
-export async function getMyStudentProfile(ctx: StudentContext) {
+export const getMyStudentProfile = cache(async (ctx: StudentContext) => {
   const s = await db.student.findUniqueOrThrow({
     where: { id: ctx.studentId },
     select: {
@@ -22,9 +26,9 @@ export async function getMyStudentProfile(ctx: StudentContext) {
   });
   const { languageGroups, ...rest } = s;
   return { ...rest, languageGroups: languageGroups.map((g) => g.group.name) };
-}
+});
 
-export async function getMyStaffProfile(ctx: StaffContext) {
+export const getMyStaffProfile = cache(async (ctx: StaffContext) => {
   return db.staff.findUniqueOrThrow({
     where: { id: ctx.staffId },
     select: {
@@ -34,4 +38,4 @@ export async function getMyStaffProfile(ctx: StaffContext) {
       faculty: { select: { name: true, code: true } },
     },
   });
-}
+});

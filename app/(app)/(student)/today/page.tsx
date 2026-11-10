@@ -16,6 +16,7 @@ import { getMyMovedAway, type MovedAwayLesson } from "@/lib/data/schedule-moves"
 import { addDaysIso, moscowToday } from "@/lib/moscow-time";
 import { dayTiming, firstDayWithLessons, formatDayLong, parseDateParam } from "@/lib/schedule/dates";
 import { scheduleHref, todayHref } from "@/lib/schedule/links";
+import { plural } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Сегодня" };
 
@@ -178,7 +179,7 @@ function NextDayLink({
   if (!nextDay) {
     return (
       <Link href="/schedule" className={buttonVariants({ variant })}>
-        В ближайшие 2 недели пар нет — открыть расписание
+        В ближайшие {LOOKAHEAD_DAYS} {plural(LOOKAHEAD_DAYS, ["день", "дня", "дней"])} пар нет — открыть расписание
       </Link>
     );
   }
