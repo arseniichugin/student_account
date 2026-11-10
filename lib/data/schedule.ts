@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import type { StudentContext, UserContext } from "@/lib/auth/guards";
 import type { LessonStatus, Prisma } from "@/lib/generated/prisma/client";
 import { addDaysIso, daysBetweenIso, dbDateToIso, isIsoDate, isoDateToDb, moscowToday } from "@/lib/moscow-time";
+import { safeExternalUrl } from "@/lib/safe-url";
 
 // Слой данных расписания.
 // ПРАВИЛА:
@@ -150,12 +151,12 @@ function toLesson(l: LessonRow): ScheduleLesson {
     roomFloor: l.room?.floor ?? null,
     building: l.building?.name ?? null,
     buildingAddress: l.building?.address ?? null,
-    isOnline: !l.room && !!l.url,
+    isOnline: !l.room && !!safeExternalUrl(l.url),
     teacher: l.teacher,
     groups: l.groups.map((g) => g.group).sort((a, b) => a.name.localeCompare(b.name, "ru")),
     stream: l.stream,
     note: l.note,
-    url: l.url,
+    url: safeExternalUrl(l.url), // только http(s): в href не попадёт javascript:
     urlDescription: l.urlDescription,
   };
 }
