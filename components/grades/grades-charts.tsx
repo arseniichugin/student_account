@@ -2,6 +2,7 @@ import type { MyDisciplineGrades } from "@/lib/data/grades";
 import { formatPoints, formatScored, scaleEntry, type GradeLetter } from "@/lib/grades/scale";
 import { chartFloor, type CheckpointStat } from "@/lib/grades/stats";
 import { formatDayMonthLong } from "@/lib/schedule/dates";
+import { plural } from "@/lib/utils";
 
 // Графики — собственный SVG без библиотек. Координаты по горизонтали — в процентах ширины, без viewBox:
 // SVG тянется на всю ширину карточки, а текст остаётся обычного размера (не «раздувается» на компьютере
@@ -116,18 +117,23 @@ const X = ["22%", "53%", "84%"] as const;
 /**
  * Динамика по срезам: средний балл за 1-й, 2-й, 3-й срез по всем дисциплинам (крупная точка цвета буквы,
  * соединены линией) и баллы отдельных дисциплин (мелкие точки — видно разброс).
+ * Средние за срезы считаются по разным наборам дисциплин (1-й — по всем, 2-й — пока по части), поэтому
+ * неполный срез — полая точка и пунктир к ней, а под срезом — «по N из M»: рост или падение линии
+ * в этом случае — не динамика студента, а другой набор дисциплин.
  */
 export function CheckpointTrendChart({ stats }: { stats: CheckpointStat[] }) {
   const floor = chartFloor(stats.flatMap((s) => s.points));
   const y = (p: number) => PLOT_TOP + ((100 - p) / (100 - floor)) * (PLOT_BOTTOM - PLOT_TOP);
   const graded = stats.map((s, i) => ({ ...s, x: X[i]! })).filter((s) => s.average);
+  const partial = (s: CheckpointStat) => s.graded < s.total;
   const description = stats
     .map((s) =>
       s.average
-        ? `${s.label}: средний ${formatScored(s.average)}, выставлен по ${s.graded} из ${s.total} дисциплин`
+        ? `${s.label}: средний ${formatScored(s.average)}, посчитан по ${s.graded} из ${s.total} ${plural(s.total, ["дисциплины", "дисциплин", "дисциплин"])}${partial(s) ? " — срез выставлен не везде" : ""}`
         : `${s.label}: ещё не выставлен`,
     )
     .join("; ");
+  const anyPartial = graded.some(partial);
   const gridLines = [...THRESHOLDS.map((t) => t.points), 100].filter((p) => p >= floor);
 
   return (
@@ -154,7 +160,7 @@ export function CheckpointTrendChart({ stats }: { stats: CheckpointStat[] }) {
           </g>
         ))}
 
-        {/* Линия между выставленными срезами */}
+        {/* Линия между выставленными срезами; к неполному срезу — пунктир (другой набор дисциплин) */}
         {graded.slice(1).map((s, i) => (
           <line
             key={s.no}
@@ -164,6 +170,7 @@ export function CheckpointTrendChart({ stats }: { stats: CheckpointStat[] }) {
             y2={y(s.average!.points)}
             strokeWidth={2.5}
             strokeLinecap="round"
+            strokeDasharray={partial(s) || partial(graded[i]!) ? "2 6" : undefined}
             className="stroke-primary"
           />
         ))}
@@ -178,7 +185,18 @@ export function CheckpointTrendChart({ stats }: { stats: CheckpointStat[] }) {
               ))}
               {s.average && e ? (
                 <>
-                  <circle cx={x} cy={y(s.average.points)} r={7} strokeWidth={2.5} className="stroke-surface" style={{ fill: e.cssVar }} />
+                  {partial(s) ? (
+                    <circle
+                      cx={x}
+                      cy={y(s.average.points)}
+                      r={6}
+                      strokeWidth={3}
+                      className="fill-surface"
+                      style={{ stroke: e.cssVar }}
+                    />
+                  ) : (
+                    <circle cx={x} cy={y(s.average.points)} r={7} strokeWidth={2.5} className="stroke-surface" style={{ fill: e.cssVar }} />
+                  )}
                   <text
                     x={x}
                     y={y(s.average.points) - 13}
@@ -202,15 +220,17 @@ export function CheckpointTrendChart({ stats }: { stats: CheckpointStat[] }) {
                 {s.label}
               </text>
               <text x={x} y={TREND_H - 10} textAnchor="middle" fontSize={11} className="fill-muted">
-                {s.graded > 0 ? `${s.graded} из ${s.total}` : `до ${formatDayMonthLong(s.due)}`}
+                {s.graded > 0 ? `по ${s.graded} из ${s.total}` : `до ${formatDayMonthLong(s.due)}`}
               </text>
             </g>
           );
         })}
       </svg>
       <figcaption className="mt-3 text-xs text-muted">
-        Крупная точка — средний балл за срез по всем дисциплинам, мелкие — отдельные дисциплины. Под срезом — у скольких
-        дисциплин он выставлен.
+        Крупная точка — средний балл за срез, мелкие — отдельные дисциплины. Под срезом — по скольким дисциплинам
+        посчитан средний.
+        {anyPartial &&
+          " Полая точка и пунктир — срез выставлен ещё не по всем дисциплинам: средние посчитаны по разным наборам, сравнивать их рано."}
       </figcaption>
     </figure>
   );
