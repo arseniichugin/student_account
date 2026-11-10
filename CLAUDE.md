@@ -96,12 +96,15 @@ Next.js 16 (App Router) + TypeScript · React 19 · Tailwind CSS 4 · PostgreSQL
 
 ```
 app/(auth)/login/        вход
-app/(app)/               кабинет: layout (requireUser) рисует оболочку и меню по роли; error.tsx — «Повторить»
+app/error.tsx            сбой общего layout кабинета (например, база недоступна) — русская страница с «Повторить»;
+app/global-error.tsx     сбой корневого layout (свои <html>/<body>); оба рисуют components/error-screen.tsx
+app/(app)/               кабинет: layout (requireUser) рисует оболочку и меню по роли; error.tsx — ошибка страницы, «Повторить»
 app/(app)/(student)/     страницы студента: today, requests, profile (layout + КАЖДАЯ страница — requireStudent)
 app/(app)/(student)/grades/  оценки студента текущего семестра (requireStudent, getMyGrades)
 app/(app)/(staff)/staff/ кабинет сотрудника деканата (requireStaff)
 app/(app)/(teacher)/     кабинет преподавателя (layout + КАЖДАЯ страница — requireTeacher): journal, journal/[assignmentId]
-                         (чужой id → 404), journal/actions.ts (saveGradesAction), teacher/profile
+                         (layout сегмента проверяет принадлежность до loading → чужой id — настоящий HTTP 404; страница — ещё раз),
+                         journal/actions.ts (saveGradesAction: лимит частоты, Zod, проверка назначения), teacher/profile
 app/(app)/schedule/      расписание группы/преподавателя — все роли (requireUser); преподавателю по умолчанию — своё
 app/(app)/map/           карта кампуса — все роли (requireUser)
 app/api/schedule/search/ подсказки поиска (getUserContext → 401 без сессии; студентов не возвращает)
@@ -110,9 +113,10 @@ lib/auth/                сессии, пароли, ограничение по
 lib/data/                ЕДИНСТВЕННОЕ место запросов к базе из страниц; всё фильтруется по контексту
 lib/data/schedule.ts     расписание: личное (StudentContext), группы/преподавателя и поиск (UserContext)
 lib/data/schedule-moves.ts  заглушки «Перенесено на …» (те же myGroupIds/checkRange из schedule.ts)
-lib/data/grades.ts       оценки: getMyGrades (StudentContext), getMyAssignments / getJournal / saveGrades (TeacherContext)
+lib/data/grades.ts       оценки: getMyGrades / getMyGradesDigest (StudentContext), getMyAssignments / getJournal / saveGrades (TeacherContext)
 lib/grades/              чистые функции: scale.ts (шкала ECTS, средние, цвета букв), term.ts (семестр, срезы),
-                         notification.ts (текст уведомления «Новая оценка»)
+                         notification.ts (текст уведомления «Новая оценка»), stats.ts (долг по дисциплине hasFailing —
+                         сданный экзамен/зачёт гасит FX/F за срезы; данные графиков, подписи)
 lib/validation/          схемы Zod
 lib/university-data/     разбор и проверка файлов вуза, импорт в базу (без server-only — нужен скрипту)
 lib/moscow-time.ts       даты «YYYY-MM-DD» и время по Москве
@@ -123,14 +127,19 @@ lib/config.ts            UNIVERSITY_NAME (название вуза, env), isDem
 lib/requests/status.ts   подписи статусов заявок (годится и клиенту)
 components/ui/           базовые компоненты (Button, Input, Card, EmptyState, Skeleton…)
 components/schedule/     LessonCard / LessonList, неделя, навигация по датам, поиск, скелетоны
+components/grades/       экран «Оценки» студента: сводка, графики (свой SVG), карточка дисциплины, переключатель семестров,
+                         блок «Оценки» на «Сегодня», скелетон
+components/journal/      журнал преподавателя: карточки групп, редактор оценок (таблица на компьютере, карточки на телефоне)
+components/error-screen.tsx  полноэкранная страница ошибки для app/error.tsx и app/global-error.tsx
 components/campus-map/   обёртка карты кампуса для React (грузит public/campus-map/)
 public/campus-map/       карта кампуса без зависимостей (campus-map.js / .css) — уходит в браузер
 tools/                   генераторы данных: schedule-generator/, campus-map/ (не попадают в Docker-образ)
 secrets/                 только на сервере (Docker): credentials.csv от импорта — НЕ коммитить
 data/university/         ЗАМЕНЯЕМЫЕ файлы вуза: students.csv, schedule.csv, campus-map.json (+ README с форматом)
 scripts/                 import-university-data.ts — команда npm run data:import
-prisma/schema.prisma     схема базы; prisma/seed.ts — демо-контент поверх импорта (заявки, оценки, объявления)
-tests/                   автотесты безопасности, импорта и расписания (Vitest); tests/fixtures — маленький набор файлов вуза
+prisma/schema.prisma     схема базы; prisma/seed.ts — демо-контент поверх импорта (заявки, оценки, объявления);
+                         на сервере пересоздаётся каждый час (docs/DEPLOYMENT.md §6)
+tests/                   автотесты безопасности, оценок, импорта и расписания (Vitest); tests/fixtures — маленький набор файлов вуза
 ```
 
 Новые запросы к данным — **только** в `lib/data/*`, функция принимает `StudentContext`,
