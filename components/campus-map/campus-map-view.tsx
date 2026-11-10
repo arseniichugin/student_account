@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MapPinOff } from "lucide-react";
 import { RetryButton } from "@/components/ui/retry-button";
-import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/states";
 import { findRoom } from "@/lib/campus-map/rooms";
 import type { CampusMapData, CampusRoom } from "@/lib/campus-map/schema";
 
@@ -123,7 +123,7 @@ function shellInsets(): { top: number; bottom: number } {
   };
 }
 
-export type CampusMapViewProps = {
+type CampusMapViewProps = {
   /** Проверенные данные карты (lib/campus-map/load.ts). */
   data: CampusMapData;
   /** Номер аудитории из адреса /map?room=… — открыть и подсветить. */
@@ -221,18 +221,21 @@ export function CampusMapView({ data, room = null }: CampusMapViewProps) {
 
   if (status === "error") {
     return (
-      <Card role="alert" className="flex flex-col items-center py-10 text-center">
-        <MapPinOff className="size-10 text-muted" aria-hidden />
-        <p className="mt-3 text-[17px] font-semibold">Не удалось загрузить карту</p>
-        <p className="mt-1 max-w-sm text-sm text-muted">Проверьте интернет и попробуйте ещё раз.</p>
-        <RetryButton
-          className="mt-5"
-          onRetry={() => {
-            setStatus("loading");
-            setAttempt((n) => n + 1);
-          }}
-        />
-      </Card>
+      <EmptyState
+        icon={MapPinOff}
+        tone="danger"
+        title="Не удалось загрузить карту"
+        action={
+          <RetryButton
+            onRetry={() => {
+              setStatus("loading");
+              setAttempt((n) => n + 1);
+            }}
+          />
+        }
+      >
+        Проверьте интернет и попробуйте ещё раз.
+      </EmptyState>
     );
   }
 

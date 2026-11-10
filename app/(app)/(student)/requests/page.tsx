@@ -4,6 +4,7 @@ import { ChevronRight, FilePlus2, FileText } from "lucide-react";
 import { StatusBadge } from "@/components/status-badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/states";
 import { requireStudent } from "@/lib/auth/guards";
 import { listMyRequests } from "@/lib/data/requests";
 import type { RequestStatus } from "@/lib/generated/prisma/enums";
@@ -37,16 +38,17 @@ export default async function RequestsPage() {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_300px] xl:gap-6">
         {requests.length === 0 ? (
-          <Card className="flex flex-col items-center py-12 text-center">
-            <FileText className="size-10 text-muted" aria-hidden />
-            <p className="mt-3 text-[17px] font-semibold">Заявок пока нет</p>
-            <p className="mt-1 max-w-xs text-sm text-muted">
-              Закажите справку онлайн — не нужно идти в деканат и стоять в очереди.
-            </p>
-            <Link href="/requests/new" className={buttonVariants({ className: "mt-5" })}>
-              Заказать справку
-            </Link>
-          </Card>
+          <EmptyState
+            icon={FileText}
+            title="Заявок пока нет"
+            action={
+              <Link href="/requests/new" className={buttonVariants()}>
+                Заказать справку
+              </Link>
+            }
+          >
+            Закажите справку онлайн — не нужно идти в деканат и стоять в очереди.
+          </EmptyState>
         ) : (
           <Card className="@container self-start p-0 sm:p-0">
             {/* Таблица — когда широка сама карточка (container query), а не экран */}

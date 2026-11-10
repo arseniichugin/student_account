@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Inbox } from "lucide-react";
 import { StatusBadge } from "@/components/status-badge";
+import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/states";
 import { requireStaff } from "@/lib/auth/guards";
 import { getMyStaffProfile } from "@/lib/data/profile";
 import { countFacultyRequestsByStatus, listFacultyRequests } from "@/lib/data/requests";
@@ -74,16 +76,19 @@ export default async function StaffRequestsPage({ searchParams }: PageProps<"/st
       </nav>
 
       {requests.length === 0 ? (
-        <Card className="flex flex-col items-center py-12 text-center">
-          <Inbox className="size-10 text-muted" aria-hidden />
-          <p className="mt-3 text-[17px] font-semibold">Заявок нет</p>
-          <p className="mt-1 text-sm text-muted">В этой категории пока пусто.</p>
-          {status && (
-            <Link href="/staff" className="mt-4 inline-flex min-h-11 items-center text-sm font-medium text-primary">
-              Показать все заявки
-            </Link>
-          )}
-        </Card>
+        <EmptyState
+          icon={Inbox}
+          title="Заявок нет"
+          action={
+            status && (
+              <Link href="/staff" className={buttonVariants({ variant: "secondary" })}>
+                Показать все заявки
+              </Link>
+            )
+          }
+        >
+          В этой категории пока пусто.
+        </EmptyState>
       ) : (
         <ul className="space-y-3">
           {requests.map((r) => {
@@ -94,22 +99,22 @@ export default async function StaffRequestsPage({ searchParams }: PageProps<"/st
                 {/* Компьютер: сведения слева, обработка справа. Телефон: друг под другом. */}
                 <Card className="@container">
                   <div className="@3xl:grid @3xl:grid-cols-[minmax(0,1fr)_minmax(0,440px)] @3xl:items-start @3xl:gap-8">
-                  <div>
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <h2 className="text-[15px] font-semibold">{r.type.name}</h2>
-                      <StatusBadge status={r.status} />
+                    <div>
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <h2 className="text-[15px] font-semibold">{r.type.name}</h2>
+                        <StatusBadge status={r.status} />
+                      </div>
+                      <p className="mt-0.5 text-sm">
+                        {s.lastName} {s.firstName} {s.middleName} · <span className="text-muted">{s.academicGroup.name}</span>
+                      </p>
+                      <p className="mt-2 text-sm text-muted">
+                        {formatDateTime(r.createdAt)}
+                        {payload.destination && ` · ${payload.destination}`}
+                        {payload.copies && ` · ${payload.copies} экз.`}
+                      </p>
+                      {payload.comment && <p className="mt-1 text-sm">«{payload.comment}»</p>}
                     </div>
-                    <p className="mt-0.5 text-sm">
-                      {s.lastName} {s.firstName} {s.middleName} · <span className="text-muted">{s.academicGroup.name}</span>
-                    </p>
-                    <p className="mt-2 text-sm text-muted">
-                      {formatDateTime(r.createdAt)}
-                      {payload.destination && ` · ${payload.destination}`}
-                      {payload.copies && ` · ${payload.copies} экз.`}
-                    </p>
-                    {payload.comment && <p className="mt-1 text-sm">«{payload.comment}»</p>}
-                  </div>
-                  <StatusForm requestId={r.id} status={r.status} comment={r.staffComment ?? ""} title={r.type.name} />
+                    <StatusForm requestId={r.id} status={r.status} comment={r.staffComment ?? ""} title={r.type.name} />
                   </div>
                 </Card>
               </li>
