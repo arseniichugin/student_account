@@ -191,59 +191,40 @@ const groupKind = { ACADEMIC: "academic", LANGUAGE: "language", OTHER: "other" }
 
 // ─── Студент ────────────────────────────────────────────────────────
 
+/** Строка расписания «кто ведёт семинары» для расчёта оценок: дисциплина, итоговый контроль, преподаватель. */
+export type SemesterAssignmentRow = {
+  disciplineId: string;
+  finalKind: "EXAM" | "CREDIT" | null;
+  finalDate: Date | null;
+  teacher: SeminarTeacher;
+};
+
+/** Всё, из чего складываются оценки студента за текущий семестр, — то, что пришло из базы. */
+export type SemesterGradesSource = {
+  /** Дисциплины семестра — всё, что есть в расписании групп студента */
+  disciplines: { id: string; name: string }[];
+  /** Назначения групп студента (итоговый контроль и преподаватели семинаров) */
+  assignments: SemesterAssignmentRow[];
+  /** Оценки студента за этот семестр */
+  grades: (GradeRow & { disciplineId: string })[];
+};
+
+export const teacherSelect = { id: true, shortName: true, fullName: true, rank: true, email: true } as const;
+
 /**
- * Оценки текущего студента за семестр (по умолчанию — текущий). Неверный или чужой номер семестра
- * (не 1…текущий) → текущий. Прошлые семестры — пустой список дисциплин: их оценок в кабинете нет.
+ * Оценки текущего семестра из данных базы — ОДНА логика для экрана студента и для деканата
+ * (lib/data/dean-grades.ts): средний по дисциплине, итоговый балл «среднее из средних», долги (hasFailing),
+ * ближайший экзамен. Чистая функция: без запросов к базе.
  */
-export async function getMyGrades(ctx: StudentContext, semester?: number | string | null): Promise<MyGrades> {
-  const student = await db.student.findUniqueOrThrow({
-    where: { id: ctx.studentId },
-    select: { course: true, academicGroupId: true, languageGroups: { select: { groupId: true } } },
-  });
-  const currentSemester = semesterForCourse(student.course);
-  const semesters = semestersUpTo(student.course);
-  const asked = typeof semester === "string" ? Number(semester) : semester;
-  const shown = typeof asked === "number" && semesters.includes(asked) ? asked : currentSemester;
-  const today = moscowToday();
-
-  const base = { semester: shown, currentSemester, semesters, isCurrent: shown === currentSemester };
-  if (shown !== currentSemester) {
-    return {
-      ...base,
-      termLabel: null,
-      disciplines: [],
-      overall: null,
-      summary: { checkpointsGraded: 0, checkpointsTotal: 0, failing: 0, currentCheckpoint: null, nextFinal: null },
-    };
-  }
-
-  const groupIds = [student.academicGroupId, ...student.languageGroups.map((g) => g.groupId)];
-  const [disciplines, assignments, grades] = await Promise.all([
-    // Дисциплины семестра — всё, что есть в расписании групп студента
-    db.discipline.findMany({
-      where: { lessons: { some: { groups: { some: { groupId: { in: groupIds } } } } } },
-      select: { id: true, name: true },
-    }),
-    db.teachingAssignment.findMany({
-      where: { groupId: { in: groupIds } },
-      select: {
-        disciplineId: true,
-        finalKind: true,
-        finalDate: true,
-        teacher: { select: { id: true, shortName: true, fullName: true, rank: true, email: true } },
-      },
-    }),
-    db.grade.findMany({
-      where: { studentId: ctx.studentId, semester: shown },
-      select: { disciplineId: true, kind: true, checkpoint: true, points: true, passed: true },
-    }),
-  ]);
-
-  const list: MyDisciplineGrades[] = disciplines
+export function buildSemesterGrades(
+  src: SemesterGradesSource,
+  today: string,
+): Pick<MyGrades, "termLabel" | "disciplines" | "overall" | "summary"> {
+  const list: MyDisciplineGrades[] = [...src.disciplines]
     .sort((a, b) => byRu(a.name, b.name))
     .map((d) => {
-      const mine = assignments.filter((a) => a.disciplineId === d.id);
-      const rows = grades.filter((g) => g.disciplineId === d.id);
+      const mine = src.assignments.filter((a) => a.disciplineId === d.id);
+      const rows = src.grades.filter((g) => g.disciplineId === d.id);
       const checkpoints = checkpointsOf(rows);
       const final = mine.map(finalOf).find(Boolean) ?? null;
       const teachers = [...new Map(mine.map((a) => [a.teacher.id, a.teacher])).values()].sort((a, b) => byRu(a.shortName, b.shortName));
@@ -263,7 +244,6 @@ export async function getMyGrades(ctx: StudentContext, semester?: number | strin
     .filter((d) => d.final?.date && d.final.date >= today)
     .sort((a, b) => a.final!.date!.localeCompare(b.final!.date!))[0];
   return {
-    ...base,
     termLabel: termLabel(),
     disciplines: list,
     overall: overallPoints === null ? null : scored(overallPoints),
@@ -275,6 +255,63 @@ export async function getMyGrades(ctx: StudentContext, semester?: number | strin
       nextFinal: next ? { disciplineId: next.disciplineId, discipline: next.discipline, kind: next.final!.kind, date: next.final!.date! } : null,
     },
   };
+}
+
+/** Семестры студента для переключателя и выбранный: неверный или чужой номер (не 1…текущий) → текущий. */
+export function semesterChoice(course: number, semester?: number | string | null) {
+  const currentSemester = semesterForCourse(course);
+  const semesters = semestersUpTo(course);
+  const asked = typeof semester === "string" ? Number(semester) : semester;
+  const shown = typeof asked === "number" && semesters.includes(asked) ? asked : currentSemester;
+  return { semester: shown, currentSemester, semesters, isCurrent: shown === currentSemester };
+}
+
+/** Прошлый семестр: оценок за него в кабинете нет — пустой список. */
+const EMPTY_SEMESTER = {
+  termLabel: null,
+  disciplines: [],
+  overall: null,
+  summary: { checkpointsGraded: 0, checkpointsTotal: 0, failing: 0, currentCheckpoint: null, nextFinal: null },
+} satisfies Pick<MyGrades, "termLabel" | "disciplines" | "overall" | "summary">;
+
+/**
+ * Оценки одного студента по id. ВНУТРЕННЯЯ функция слоя данных: вызывающий сам проверил доступ —
+ * студент передаёт ctx.studentId из сессии (getMyGrades), деканат — id студента своего факультета
+ * (getFacultyStudentGrades). Страницы её не вызывают.
+ */
+export async function loadStudentGrades(studentId: string, semester?: number | string | null): Promise<MyGrades> {
+  const student = await db.student.findUniqueOrThrow({
+    where: { id: studentId },
+    select: { course: true, academicGroupId: true, languageGroups: { select: { groupId: true } } },
+  });
+  const base = semesterChoice(student.course, semester);
+  if (!base.isCurrent) return { ...base, ...EMPTY_SEMESTER };
+
+  const groupIds = [student.academicGroupId, ...student.languageGroups.map((g) => g.groupId)];
+  const [disciplines, assignments, grades] = await Promise.all([
+    // Дисциплины семестра — всё, что есть в расписании групп студента
+    db.discipline.findMany({
+      where: { lessons: { some: { groups: { some: { groupId: { in: groupIds } } } } } },
+      select: { id: true, name: true },
+    }),
+    db.teachingAssignment.findMany({
+      where: { groupId: { in: groupIds } },
+      select: { disciplineId: true, finalKind: true, finalDate: true, teacher: { select: teacherSelect } },
+    }),
+    db.grade.findMany({
+      where: { studentId, semester: base.semester },
+      select: { disciplineId: true, kind: true, checkpoint: true, points: true, passed: true },
+    }),
+  ]);
+  return { ...base, ...buildSemesterGrades({ disciplines, assignments, grades }, moscowToday()) };
+}
+
+/**
+ * Оценки текущего студента за семестр (по умолчанию — текущий). Неверный или чужой номер семестра
+ * (не 1…текущий) → текущий. Прошлые семестры — пустой список дисциплин: их оценок в кабинете нет.
+ */
+export async function getMyGrades(ctx: StudentContext, semester?: number | string | null): Promise<MyGrades> {
+  return loadStudentGrades(ctx.studentId, semester);
 }
 
 /** Последняя выставленная оценка — для блока «Оценки» на «Сегодня». */
