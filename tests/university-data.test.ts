@@ -272,11 +272,21 @@ describe("Импорт со сломанными файлами не меняе�
       copyFileSync(path.join(FIXTURES, "broken", broken), path.join(dir, target));
 
       const before = await snapshot();
+      // tsx запускаем через текущий node, а не через node_modules/.bin/tsx: в Windows там
+      // shell-скрипт, который spawnSync без оболочки не запускает (status === null).
       const run = spawnSync(
-        path.join(process.cwd(), "node_modules/.bin/tsx"),
-        ["scripts/import-university-data.ts", "--dir", dir, "--credentials", path.join(dir, "credentials.csv")],
+        process.execPath,
+        [
+          path.join(process.cwd(), "node_modules/tsx/dist/cli.mjs"),
+          "scripts/import-university-data.ts",
+          "--dir",
+          dir,
+          "--credentials",
+          path.join(dir, "credentials.csv"),
+        ],
         { encoding: "utf8", env: { ...process.env } },
       );
+      expect(run.error).toBeUndefined();
       expect(run.status).toBe(1);
       expect(run.stderr).toContain(expected);
       expect(run.stderr).toMatch(/Найдено \d+ ошиб\S+, база не изменена/);
