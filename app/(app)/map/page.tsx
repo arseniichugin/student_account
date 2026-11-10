@@ -11,11 +11,14 @@ export const metadata: Metadata = { title: "Карта" };
 
 export default async function MapPage({ searchParams }: PageProps<"/map">) {
   // Карта — для любого вошедшего: студенту и сотруднику деканата.
-  await requireUser();
+  const user = await requireUser();
   const { room: roomParam } = await searchParams;
   const room = (Array.isArray(roomParam) ? roomParam[0] : roomParam)?.trim().slice(0, 100) || null;
   // Файл карты заменяемый: читаем при каждом запросе и проверяем структуру.
   const map = await loadCampusMap();
+  // Подробности (файл, место ошибки в JSON) — в серверный лог; на странице — только сотруднику деканата,
+  // который может заменить файл. Студенту технические детали ни к чему.
+  if (!map.ok) console.error("[map] Карта кампуса не загрузилась:", map.error);
 
   return (
     <div className="min-w-0 space-y-4">
@@ -41,10 +44,17 @@ export default async function MapPage({ searchParams }: PageProps<"/map">) {
       ) : (
         <Card role="alert" className="flex flex-col items-center py-12 text-center">
           <MapPinOff className="size-10 text-danger" aria-hidden />
-          <p className="mt-3 text-[17px] font-semibold">Не удалось загрузить карту: {map.error}</p>
+          <p className="mt-3 text-[17px] font-semibold">Не удалось загрузить карту. Попробуйте позже</p>
           <p className="mt-1 max-w-sm text-sm text-muted">
-            Попробуйте ещё раз. Если ошибка повторяется — сообщите в деканат.
+            {user.role === "STAFF"
+              ? "Проверьте файл карты в данных вуза — подробности ниже."
+              : "Если ошибка повторяется — сообщите в деканат."}
           </p>
+          {user.role === "STAFF" && (
+            <p className="mt-3 max-w-md rounded-xl bg-surface-muted px-3.5 py-2.5 text-left text-sm break-words text-text">
+              Для сотрудника деканата: {map.error}
+            </p>
+          )}
           <RetryButton className="mt-5" />
         </Card>
       )}
