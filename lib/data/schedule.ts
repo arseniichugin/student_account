@@ -13,8 +13,6 @@ import { safeExternalUrl } from "@/lib/safe-url";
 //    (requireUser); студентов поиск не возвращает;
 //  — функции возвращают плоские сериализуемые объекты: даты «YYYY-MM-DD», время «HH:MM» (по Москве).
 
-export { moscowToday };
-
 /** Максимальная длина запрошенного периода — чуть больше семестра. */
 export const MAX_RANGE_DAYS = 190;
 
@@ -84,8 +82,11 @@ export class ScheduleRangeError extends Error {}
 
 // ─── Помощники ──────────────────────────────────────────────────────
 
-/** Проверяет период; при ошибке — ScheduleRangeError (страница должна проверить параметры заранее). */
-function checkRange(from: string, to: string) {
+/**
+ * Проверяет период; при ошибке — ScheduleRangeError (страница должна проверить параметры заранее).
+ * Возвращает фильтр Prisma по датам. Общий для всего слоя расписания (и lib/data/schedule-moves.ts).
+ */
+export function checkRange(from: string, to: string) {
   if (!isIsoDate(from) || !isIsoDate(to)) throw new ScheduleRangeError("Дата должна быть в формате YYYY-MM-DD");
   const days = daysBetweenIso(from, to);
   if (days < 0) throw new ScheduleRangeError("Начало периода позже конца");
@@ -167,7 +168,7 @@ const facultySelect = { select: { id: true, code: true, name: true } } as const;
 // ─── Личное расписание студента ─────────────────────────────────────
 
 /** Группы студента: академическая + языковые. Только по id из сессии. */
-async function myGroupIds(ctx: StudentContext): Promise<string[]> {
+export async function myGroupIds(ctx: StudentContext): Promise<string[]> {
   const s = await db.student.findUniqueOrThrow({
     where: { id: ctx.studentId },
     select: { academicGroupId: true, languageGroups: { select: { groupId: true } } },
@@ -190,13 +191,12 @@ export function getMyScheduleForDate(ctx: StudentContext, date: string = moscowT
 
 // ─── Открытое расписание (любой вошедший) ──────────────────────────
 
-/** Факультеты для фильтра поиска; isMine — факультет вошедшего (удобно выбрать по умолчанию). */
-export async function listFaculties(ctx: UserContext): Promise<(FacultyOption & { isMine: boolean })[]> {
-  const rows = await db.faculty.findMany({
+/** Факультеты для фильтра поиска — в порядке из students.csv. */
+export function listFaculties(_ctx: UserContext): Promise<FacultyOption[]> {
+  return db.faculty.findMany({
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     select: { id: true, code: true, name: true },
   });
-  return rows.map((f) => ({ ...f, isMine: f.id === ctx.facultyId }));
 }
 
 /**
@@ -247,15 +247,14 @@ export async function searchScheduleTargets(
 }
 
 /**
- * Расписание группы за период. includeSubgroups — для академической группы добавить
- * занятия её языковых групп. Неизвестная группа → null (страница показывает «Не найдено»).
+ * Расписание группы за период — только занятия самой группы (у академической — без её языковых групп,
+ * они перечислены в subgroups). Неизвестная группа → null (страница показывает «Не найдено»).
  */
 export async function getGroupSchedule(
   _ctx: UserContext,
   groupId: string,
   from: string,
   to: string,
-  options: { includeSubgroups?: boolean } = {},
 ): Promise<{ group: ScheduleGroupInfo; lessons: ScheduleLesson[] } | null> {
   const date = checkRange(from, to);
   if (groupId.length === 0 || groupId.length > 64) return null;
@@ -272,8 +271,7 @@ export async function getGroupSchedule(
     },
   });
   if (!g) return null;
-  const ids = [g.id, ...(options.includeSubgroups ? g.children.map((c) => c.id) : [])];
-  const rows = await findLessons({ groups: { some: { groupId: { in: ids }, date } } });
+  const rows = await findLessons({ groups: { some: { groupId: g.id, date } } });
   return {
     group: {
       id: g.id,

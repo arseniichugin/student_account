@@ -2,12 +2,14 @@ import "server-only";
 import { db } from "@/lib/db";
 import type { StudentContext, UserContext } from "@/lib/auth/guards";
 import type { Prisma } from "@/lib/generated/prisma/client";
-import { addDaysIso, daysBetweenIso, dbDateToIso, isIsoDate, isoDateToDb } from "@/lib/moscow-time";
+import { addDaysIso, dbDateToIso, isoDateToDb } from "@/lib/moscow-time";
 import { movedSearchRange, parseMovedFrom } from "@/lib/schedule/moves";
+import { checkRange, myGroupIds } from "./schedule";
 
 // Заглушки «Перенесено на 06.11, 4-я пара» на исходной дате перенесённого занятия.
-// Отдельный модуль, чтобы не трогать основной слой расписания (lib/data/schedule.ts).
-// ПРАВИЛА те же: личное — только по ctx.studentId из сессии; группа и преподаватель — открытые данные вуза.
+// Дополнение к lib/data/schedule.ts с теми же правилами и помощниками: группы студента — myGroupIds
+// (только по ctx.studentId из сессии), период — checkRange (неверный → ScheduleRangeError, как у
+// getMyScheduleForRange и др.); группа и преподаватель — открытые данные вуза.
 
 /** Занятие, которое ушло с этой даты на другую. */
 export type MovedAwayLesson = {
@@ -29,37 +31,38 @@ export type MovedAwayLesson = {
   toPairEnd: number | null;
 };
 
-const MAX_RANGE_DAYS = 190;
 /** Где искать время исходной пары: ± столько дней от исходной даты. */
 const GRID_WINDOW_DAYS = 14;
 
 /** Перенесённые с дат from…to занятия студента (академическая и его языковые группы). */
 export async function getMyMovedAway(ctx: StudentContext, from: string, to: string): Promise<MovedAwayLesson[]> {
-  if (!validRange(from, to)) return [];
-  const s = await db.student.findUniqueOrThrow({
-    where: { id: ctx.studentId },
-    select: { academicGroupId: true, languageGroups: { select: { groupId: true } } },
-  });
-  const groupIds = [s.academicGroupId, ...s.languageGroups.map((g) => g.groupId)];
+  checkRange(from, to);
+  const groupIds = await myGroupIds(ctx);
   return findMovedAway(from, to, (date) => ({ groups: { some: { groupId: { in: groupIds }, date } } }));
 }
 
 /** Перенесённые с дат from…to занятия группы. */
-export function getGroupMovedAway(_ctx: UserContext, groupId: string, from: string, to: string): Promise<MovedAwayLesson[]> {
-  if (!validRange(from, to) || groupId.length === 0 || groupId.length > 64) return Promise.resolve([]);
+export async function getGroupMovedAway(
+  _ctx: UserContext,
+  groupId: string,
+  from: string,
+  to: string,
+): Promise<MovedAwayLesson[]> {
+  checkRange(from, to);
+  if (groupId.length === 0 || groupId.length > 64) return [];
   return findMovedAway(from, to, (date) => ({ groups: { some: { groupId, date } } }));
 }
 
 /** Перенесённые с дат from…to занятия преподавателя. */
-export function getTeacherMovedAway(_ctx: UserContext, teacherId: string, from: string, to: string): Promise<MovedAwayLesson[]> {
-  if (!validRange(from, to) || teacherId.length === 0 || teacherId.length > 64) return Promise.resolve([]);
+export async function getTeacherMovedAway(
+  _ctx: UserContext,
+  teacherId: string,
+  from: string,
+  to: string,
+): Promise<MovedAwayLesson[]> {
+  checkRange(from, to);
+  if (teacherId.length === 0 || teacherId.length > 64) return [];
   return findMovedAway(from, to, (date) => ({ teacherId, date }));
-}
-
-function validRange(from: string, to: string): boolean {
-  if (!isIsoDate(from) || !isIsoDate(to)) return false;
-  const days = daysBetweenIso(from, to);
-  return days >= 0 && days <= MAX_RANGE_DAYS;
 }
 
 type DateFilter = { gte: Date; lte: Date };
@@ -105,7 +108,10 @@ async function findMovedAway(
       groups: {
         some: {
           groupId: { in: groupIds },
-          date: { gte: isoDateToDb(addDaysIso(dates[0]!, -GRID_WINDOW_DAYS)), lte: isoDateToDb(addDaysIso(dates[dates.length - 1]!, GRID_WINDOW_DAYS)) },
+          date: {
+            gte: isoDateToDb(addDaysIso(dates[0]!, -GRID_WINDOW_DAYS)),
+            lte: isoDateToDb(addDaysIso(dates[dates.length - 1]!, GRID_WINDOW_DAYS)),
+          },
         },
       },
     },

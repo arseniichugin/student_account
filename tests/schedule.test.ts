@@ -2,8 +2,10 @@
  * Слой данных расписания (lib/data/schedule.ts).
  * Нужна база с загруженным набором данных: npm run db:setup (или импорт папки UNIVERSITY_DATA_DIR + db:seed).
  *
- * Личное расписание сверяется с подсчётом НАПРЯМУЮ по data/university/*.csv
- * (простым разбором строк, независимо от кода импорта).
+ * Личное расписание сверяется с подсчётом НАПРЯМУЮ по students.csv и schedule.csv
+ * (только разбор CSV и дат, без сборки набора данных из кода импорта).
+ * Тест не знает названий групп и дат конкретного вуза: всё берётся из файлов,
+ * поэтому проходит и на другом наборе (UNIVERSITY_DATA_DIR=<папка> npm test после импорта этой папки).
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -21,25 +23,42 @@ import {
   listFaculties,
   searchScheduleTargets,
   weekRange,
+  type ScheduleLesson,
 } from "@/lib/data/schedule";
-import { moscowToday } from "@/lib/moscow-time";
+import { addDaysIso, moscowToday } from "@/lib/moscow-time";
+import { parseCsv } from "@/lib/university-data/csv";
+import { testLoginsFromEnv } from "@/lib/university-data/import";
+import { universityDataDir } from "@/lib/university-data/load";
+import { toIsoDate } from "@/lib/university-data/validate";
 
-// Другой набор файлов: UNIVERSITY_DATA_DIR=<папка> npm test (после импорта этой папки)
-const DATA = path.resolve(process.env.UNIVERSITY_DATA_DIR || "data/university");
+const DATA = universityDataDir();
 
-/** Простой разбор: в основном наборе нет кавычек, поэтому достаточно split. */
 function readRows(file: string): Record<string, string>[] {
-  const [header, ...lines] = readFileSync(path.join(DATA, file), "utf8").replace(/^﻿/, "").split(/\r?\n/).filter(Boolean);
-  const cols = header!.split(";");
-  return lines.map((l) => {
-    const v = l.split(";");
-    expect(v.length).toBe(cols.length);
-    return Object.fromEntries(cols.map((c, i) => [c, v[i]!]));
-  });
+  const table = parseCsv(readFileSync(path.join(DATA, file), "utf8"));
+  return table.records.map((r) => Object.fromEntries(table.headers.map((h, i) => [h, r.values[i] ?? ""])));
 }
 
-const scheduleRows = readRows("schedule.csv");
+type ScheduleRow = Record<string, string> & { isoDate: string };
+const scheduleRows: ScheduleRow[] = readRows("schedule.csv").map((r) => Object.assign(r, { isoDate: toIsoDate(r["date"]!)! }));
 const studentRows = readRows("students.csv");
+const languageGroupsOf = (r: Record<string, string>) => [r["Языковая группа 1"], r["Языковая группа 2"]].filter((g): g is string => !!g);
+
+const dates = scheduleRows.map((r) => r.isoDate).sort();
+const firstDate = dates[0]!;
+const lastDate = dates.at(-1)!;
+/** Период из данных, который ещё принимает слой расписания (не длиннее MAX_RANGE_DAYS). */
+const windowEnd = [addDaysIso(firstDate, MAX_RANGE_DAYS), lastDate].sort()[0]!;
+const inWindow = (d: string) => firstDate <= d && d <= windowEnd;
+
+/** Всё расписание за период любой длины — кусками не длиннее MAX_RANGE_DAYS. */
+async function inChunks(load: (from: string, to: string) => Promise<ScheduleLesson[]>, from: string, to: string) {
+  const all: ScheduleLesson[] = [];
+  for (let start = from; start <= to; start = addDaysIso(start, MAX_RANGE_DAYS + 1)) {
+    const end = [addDaysIso(start, MAX_RANGE_DAYS), to].sort()[0]!;
+    all.push(...(await load(start, end)));
+  }
+  return all;
+}
 
 type TestStudent = { ctx: StudentContext; login: string; groups: string[]; academic: string };
 let testStudents: TestStudent[] = [];
@@ -57,7 +76,7 @@ beforeAll(async () => {
       ctx: { userId: u.id, studentId: u.student!.id } as StudentContext,
       login: u.login,
       academic: row["Академическая группа"]!,
-      groups: [row["Академическая группа"]!, row["Языковая группа 1"]!, row["Языковая группа 2"]!].filter(Boolean),
+      groups: [row["Академическая группа"]!, ...languageGroupsOf(row)],
     };
   });
   anyUser = { userId: users[0]!.id, role: "STUDENT", facultyId: users[0]!.student!.facultyId } as UserContext;
@@ -68,26 +87,24 @@ afterAll(async () => {
 });
 
 describe("Личное расписание студента", () => {
-  it("есть три тестовых студента", () => {
-    expect(testStudents).toHaveLength(3);
+  it("есть тестовые студенты (по умолчанию — три)", () => {
+    expect(testStudents).toHaveLength(testLoginsFromEnv()?.length ?? 3);
   });
 
   it("совпадает с подсчётом по schedule.csv и не содержит чужих языковых групп", async () => {
-    const dates = scheduleRows.map((r) => r["date"]!.replaceAll(".", "-")).sort();
-    const from = dates[0]!;
-    const to = dates.at(-1)!;
-
     for (const s of testStudents) {
       const expected = new Set(scheduleRows.filter((r) => s.groups.includes(r["group"]!)).map((r) => r["lessonOid"]));
-      const lessons = await getMyScheduleForRange(s.ctx, from, to);
+      const lessons = await inChunks((from, to) => getMyScheduleForRange(s.ctx, from, to), firstDate, lastDate);
       expect(lessons.length, s.login).toBe(expected.size);
-      expect(lessons.length).toBeGreaterThan(100);
+      expect(lessons.length).toBeGreaterThan(0);
 
-      // Языковые группы той же академической группы, в которых студент НЕ состоит
+      // Языковые группы однокурсников по академической группе, в которых студент НЕ состоит (по students.csv)
       const siblings = new Set(
-        scheduleRows.map((r) => r["group"]!).filter((g) => g.startsWith(`${s.academic} (`) && !s.groups.includes(g)),
+        studentRows
+          .filter((r) => r["Академическая группа"] === s.academic)
+          .flatMap(languageGroupsOf)
+          .filter((g) => !s.groups.includes(g)),
       );
-      expect(siblings.size).toBeGreaterThan(0);
       for (const l of lessons) {
         const names = l.groups.map((g) => g.name);
         expect(names.some((n) => s.groups.includes(n))).toBe(true);
@@ -103,9 +120,10 @@ describe("Личное расписание студента", () => {
 
   it("отмены и переносы приходят со статусом и причиной", async () => {
     const s = testStudents[0]!;
-    const lessons = await getMyScheduleForRange(s.ctx, "2026-09-01", "2026-12-31");
+    const lessons = await getMyScheduleForRange(s.ctx, firstDate, windowEnd);
     const changed = lessons.filter((l) => l.status !== "normal");
-    const expected = scheduleRows.filter((r) => s.groups.includes(r["group"]!) && r["status"] !== "normal" && r["date"]! <= "2026.12.31");
+    const isChanged = (status: string | undefined) => !!status && status.toLowerCase() !== "normal";
+    const expected = scheduleRows.filter((r) => s.groups.includes(r["group"]!) && isChanged(r["status"]) && inWindow(r.isoDate));
     expect(changed.length).toBe(new Set(expected.map((r) => r["lessonOid"])).size);
     for (const l of changed) expect(l.note).toBeTruthy();
   });
@@ -114,8 +132,10 @@ describe("Личное расписание студента", () => {
     const today = moscowToday(new Date("2026-11-09T21:30:00Z")); // 00:30 10 ноября по Москве
     expect(today).toBe("2026-11-10");
     expect(weekRange("2026-11-12")).toEqual({ from: "2026-11-09", to: "2026-11-15" });
-    const lessons = await getMyScheduleForDate(testStudents[0]!.ctx, "2026-11-10");
-    expect(lessons.every((l) => l.date === "2026-11-10")).toBe(true);
+    const day = scheduleRows.find((r) => testStudents[0]!.groups.includes(r["group"]!))!.isoDate;
+    const lessons = await getMyScheduleForDate(testStudents[0]!.ctx, day);
+    expect(lessons.length).toBeGreaterThan(0);
+    expect(lessons.every((l) => l.date === day)).toBe(true);
     await expect(getMyScheduleForDate(testStudents[0]!.ctx)).resolves.toBeInstanceOf(Array);
   });
 
@@ -146,9 +166,10 @@ describe("Поиск и открытое расписание", () => {
 
   it("поиск группы с фильтром по факультету", async () => {
     const faculties = await listFaculties(anyUser);
-    expect(faculties.filter((f) => f.isMine)).toHaveLength(1);
+    expect(faculties.length).toBeGreaterThan(1);
     const f = faculties[0]!;
-    const academic = scheduleRows.find((r) => r["group"]!.includes(f.code))!["group"]!;
+    // Академическая группа этого факультета — из students.csv, без предположений о формате названия
+    const academic = studentRows.find((r) => r["Код факультета"] === f.code)!["Академическая группа"]!;
     const results = await searchScheduleTargets(anyUser, academic.toLowerCase(), { facultyId: f.id });
     expect(results.some((r) => r.type === "group" && r.name === academic)).toBe(true);
     for (const r of results) if (r.type === "group") expect(r.faculty?.id).toBe(f.id);
@@ -176,31 +197,32 @@ describe("Поиск и открытое расписание", () => {
     } finally {
       await db.group.delete({ where: { id: g.id } });
     }
-    // Обычный запрос с дефисом работает как раньше
-    const academic = scheduleRows.find((r) => /^\d-/.test(r["group"]!))!["group"]!;
-    expect((await searchScheduleTargets(anyUser, academic.slice(0, 4))).some((r) => r.type === "group" && r.name === academic)).toBe(true);
+    // Обычный запрос (в названиях групп бывают дефисы и пробелы) работает как раньше
+    const academicGroups = studentRows.map((r) => r["Академическая группа"]!);
+    const academic = academicGroups.find((n) => /[-\s]/.test(n)) ?? academicGroups[0]!;
+    expect((await searchScheduleTargets(anyUser, academic)).some((r) => r.type === "group" && r.name === academic)).toBe(true);
   });
 
   it("расписание группы и преподавателя совпадает с CSV", async () => {
     const s = testStudents[0]!;
     const group = await db.group.findUniqueOrThrow({ where: { name: s.academic } });
-    const res = await getGroupSchedule(anyUser, group.id, "2026-11-09", "2026-11-15");
-    const expected = new Set(
-      scheduleRows.filter((r) => r["group"] === s.academic && r["date"]! >= "2026.11.09" && r["date"]! <= "2026.11.15").map((r) => r["lessonOid"]),
-    );
+    const groupRows = scheduleRows.filter((r) => r["group"] === s.academic);
+    const week = weekRange(groupRows[Math.floor(groupRows.length / 2)]!.isoDate);
+    const res = await getGroupSchedule(anyUser, group.id, week.from, week.to);
+    const expected = new Set(groupRows.filter((r) => week.from <= r.isoDate && r.isoDate <= week.to).map((r) => r["lessonOid"]));
     expect(res!.lessons.length).toBe(expected.size);
     expect(res!.group.kind).toBe("academic");
-    expect(res!.group.subgroups.length).toBeGreaterThan(0);
+    // Только занятия самой группы — языковые группы перечислены отдельно (subgroups)
+    expect(res!.lessons.every((l) => l.groups.some((g) => g.id === group.id))).toBe(true);
+    const hasLanguageGroups = studentRows.some((r) => r["Академическая группа"] === s.academic && languageGroupsOf(r).length > 0);
+    if (hasLanguageGroups) expect(res!.group.subgroups.length).toBeGreaterThan(0);
 
-    const withSubgroups = await getGroupSchedule(anyUser, group.id, "2026-11-09", "2026-11-15", { includeSubgroups: true });
-    expect(withSubgroups!.lessons.length).toBeGreaterThan(res!.lessons.length);
-
-    const teacherRow = scheduleRows.find((r) => r["lecturerOid"])!;
-    const teacher = await db.teacher.findUniqueOrThrow({ where: { oid: teacherRow["lecturerOid"]! } });
-    const tRes = await getTeacherSchedule(anyUser, teacher.id, "2026-09-01", "2026-12-31");
-    const tExpected = new Set(
-      scheduleRows.filter((r) => r["lecturerOid"] === teacherRow["lecturerOid"] && r["date"]! <= "2026.12.31").map((r) => r["lessonOid"]),
-    );
+    // Ключ преподавателя — как у импорта: lecturerOid, а если его нет — краткое ФИО
+    const teacherKey = (r: Record<string, string>) => r["lecturerOid"] || r["lecturer"] || "";
+    const oid = teacherKey(scheduleRows.find((r) => teacherKey(r) !== "")!);
+    const teacher = await db.teacher.findUniqueOrThrow({ where: { oid } });
+    const tRes = await getTeacherSchedule(anyUser, teacher.id, firstDate, windowEnd);
+    const tExpected = new Set(scheduleRows.filter((r) => teacherKey(r) === oid && inWindow(r.isoDate)).map((r) => r["lessonOid"]));
     expect(tRes!.lessons.length).toBe(tExpected.size);
     expect(tRes!.lessons.every((l) => l.teacher?.id === teacher.id)).toBe(true);
   });

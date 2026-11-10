@@ -280,7 +280,8 @@ const SCHEDULE_COLUMNS: ColumnSpec[] = [
 const DATE_RE = /^(\d{4})[.-](\d{2})[.-](\d{2})$/;
 const TIME_RE = /^(\d{1,2}):(\d{2})(?::\d{2})?$/;
 
-function toIsoDate(v: string): string | null {
+/** «2026.09.01» или «2026-09-01» → «2026-09-01»; не дата → null. */
+export function toIsoDate(v: string): string | null {
   const m = DATE_RE.exec(v);
   if (!m) return null;
   const iso = `${m[1]}-${m[2]}-${m[3]}`;
