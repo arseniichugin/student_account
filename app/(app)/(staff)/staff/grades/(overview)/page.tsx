@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ChevronRight, GraduationCap, SearchX, X } from "lucide-react";
+import { ChevronRight, GraduationCap, Search, SearchX, X } from "lucide-react";
 import { CohortSummaryCard, studentsLabel } from "@/components/dean-grades/cohort-summary";
 import { CourseGroups } from "@/components/dean-grades/course-groups";
 import { CourseSwitcher } from "@/components/dean-grades/course-switcher";
@@ -17,7 +17,7 @@ import { requireStaff } from "@/lib/auth/guards";
 import { getCourseOverview, searchFacultyStudents } from "@/lib/data/dean-grades";
 import { checkpointLabel, termLabel } from "@/lib/grades/term";
 import { firstParam } from "@/lib/schedule/dates";
-import { STUDENT_SEARCH_MAX_LENGTH, deanStudentHref } from "@/lib/validation/dean-grades";
+import { STUDENT_SEARCH_MAX_LENGTH, STUDENT_SEARCH_MIN_LENGTH, deanStudentHref } from "@/lib/validation/dean-grades";
 
 export const metadata: Metadata = { title: "Успеваемость" };
 
@@ -32,10 +32,12 @@ export default async function DeanGradesPage({ searchParams }: PageProps<"/staff
   const params = await searchParams;
   const q = (firstParam(params.q) ?? "").trim().slice(0, STUDENT_SEARCH_MAX_LENGTH);
   const debt = firstParam(params.debt) ?? null;
+  // Один символ — не ищем (иначе «никого не нашли» спорит с подсказкой под полем), а просим набрать больше
+  const tooShort = q !== "" && q.length < STUDENT_SEARCH_MIN_LENGTH;
 
   const [overview, search] = await Promise.all([
     getCourseOverview(ctx, firstParam(params.course)),
-    q ? searchFacultyStudents(ctx, q) : null,
+    q && !tooShort ? searchFacultyStudents(ctx, q) : null,
   ]);
   if (search?.exact) redirect(deanStudentHref(search.exact));
 
@@ -60,6 +62,7 @@ export default async function DeanGradesPage({ searchParams }: PageProps<"/staff
     return `/staff/grades${s ? `?${s}` : ""}`;
   };
   const cp = checkpointLabel(o.summary.checkpoint);
+  const example = o.sampleRecordBook ? `, например ${o.sampleRecordBook}` : "";
 
   return (
     <div className="space-y-6 lg:space-y-8">
@@ -71,12 +74,12 @@ export default async function DeanGradesPage({ searchParams }: PageProps<"/staff
           </p>
         </div>
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,28rem)_minmax(0,1fr)] lg:items-end lg:justify-between">
-          <StudentSearch course={course} initialQuery={q} />
+          <StudentSearch course={course} initialQuery={q} example={o.sampleRecordBook} />
           <CourseSwitcher courses={o.courses} shown={course} className="lg:justify-self-end" />
         </div>
       </div>
 
-      {search && (
+      {(search || tooShort) && (
         <section id="search-results" aria-labelledby="search-title" className="scroll-mt-24 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 id="search-title" className="text-[22px] font-bold break-words">
@@ -87,9 +90,18 @@ export default async function DeanGradesPage({ searchParams }: PageProps<"/staff
               Сбросить поиск
             </Link>
           </div>
-          {search.results.length === 0 ? (
+          {search?.layout && (
+            <p className="rounded-xl bg-primary-soft px-3.5 py-3 text-sm text-primary">
+              Похоже, включена английская раскладка — показываем найденных по запросу «{search.layout}».
+            </p>
+          )}
+          {!search ? (
+            <EmptyState icon={Search} title={`Введите хотя бы ${STUDENT_SEARCH_MIN_LENGTH} символа`}>
+              Наберите фамилию или номер зачётки{example}. Ищем только среди студентов вашего факультета.
+            </EmptyState>
+          ) : search.results.length === 0 ? (
             <EmptyState icon={SearchX} title="На факультете никого не нашли">
-              Проверьте фамилию или номер зачётки, например 25СЛ0001. Ищем только среди студентов вашего факультета.
+              Проверьте фамилию или номер зачётки{example}. Ищем только среди студентов вашего факультета.
             </EmptyState>
           ) : (
             <ul className="divide-y divide-border overflow-hidden rounded-card border border-border bg-surface">

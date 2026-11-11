@@ -8,18 +8,19 @@ import { RetryButton } from "@/components/ui/retry-button";
 import { cn } from "@/lib/utils";
 import {
   STUDENT_SEARCH_MAX_LENGTH,
+  STUDENT_SEARCH_MIN_LENGTH,
   deanStudentHref,
   type StudentSearchItem,
   type StudentSearchResponse,
 } from "@/lib/validation/dean-grades";
 
-const MIN_QUERY = 2;
+const MIN_QUERY = STUDENT_SEARCH_MIN_LENGTH;
 const DEBOUNCE_MS = 250;
 
 type State =
   | { status: "idle" }
   | { status: "loading" }
-  | { status: "done"; exact: string | null; results: StudentSearchItem[] }
+  | { status: "done"; exact: string | null; results: StudentSearchItem[]; layout?: string }
   | { status: "error"; message: string; unauthorized?: boolean };
 
 /**
@@ -28,7 +29,16 @@ type State =
  * и страница сама откроет студента по зачётке или покажет найденных.
  * Клавиатура: ↑/↓ — выбор подсказки, Enter — открыть, Esc — закрыть список, второе Esc — очистить.
  */
-export function StudentSearch({ course, initialQuery = "" }: { course: number; initialQuery?: string }) {
+export function StudentSearch({
+  course,
+  initialQuery = "",
+  example = null,
+}: {
+  course: number;
+  initialQuery?: string;
+  /** Пример номера зачётки из данных факультета (первая зачётка курса); null — без примера */
+  example?: string | null;
+}) {
   const router = useRouter();
   const id = useId();
   const listId = `${id}-list`;
@@ -56,7 +66,7 @@ export function StudentSearch({ course, initialQuery = "" }: { course: number; i
         }
         if (!res.ok) throw new Error(String(res.status));
         const data = (await res.json()) as Extract<StudentSearchResponse, { results: unknown }>;
-        setState({ status: "done", exact: data.exact, results: data.results });
+        setState({ status: "done", exact: data.exact, results: data.results, layout: data.layout });
         setActive(-1);
       } catch (e) {
         if (controller.signal.aborted) return;
@@ -174,33 +184,42 @@ export function StudentSearch({ course, initialQuery = "" }: { course: number; i
       </form>
 
       {/* Подсказки — сразу под полем; на компьютере — поверх страницы, на телефоне — в потоке (видны над клавиатурой) */}
-      <ul
-        id={listId}
-        role="listbox"
-        aria-label="Найденные студенты"
+      <div
         hidden={results.length === 0}
-        className="mt-2 max-h-[60dvh] divide-y divide-border overflow-y-auto overscroll-contain rounded-card border border-border bg-surface shadow-lg lg:absolute lg:inset-x-0 lg:z-40"
+        className="mt-2 overflow-hidden rounded-card border border-border bg-surface shadow-lg lg:absolute lg:inset-x-0 lg:z-40"
       >
-        {results.map((s, i) => (
-          <li
-            key={s.recordBookNo}
-            id={`${id}-opt-${i}`}
-            role="option"
-            aria-selected={i === active}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => go(s.recordBookNo)}
-            className={cn("flex min-h-12 cursor-pointer items-center gap-3 px-4 py-2 hover:bg-surface-muted", i === active && "bg-primary-soft")}
-          >
-            <UserRound className="size-5 shrink-0 text-muted" aria-hidden />
-            <span className="min-w-0">
-              <span className="block font-medium break-words">{s.fullName}</span>
-              <span className="block text-sm break-words text-muted">
-                {s.recordBookNo} · {s.group} · {s.course} курс
+        {state.status === "done" && state.layout && (
+          <p className="border-b border-border bg-primary-soft px-4 py-2 text-sm text-primary" aria-hidden>
+            Похоже, включена английская раскладка — ищем «{state.layout}»
+          </p>
+        )}
+        <ul
+          id={listId}
+          role="listbox"
+          aria-label="Найденные студенты"
+          className="max-h-[60dvh] divide-y divide-border overflow-y-auto overscroll-contain"
+        >
+          {results.map((s, i) => (
+            <li
+              key={s.recordBookNo}
+              id={`${id}-opt-${i}`}
+              role="option"
+              aria-selected={i === active}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => go(s.recordBookNo)}
+              className={cn("flex min-h-12 cursor-pointer items-center gap-3 px-4 py-2 hover:bg-surface-muted", i === active && "bg-primary-soft")}
+            >
+              <UserRound className="size-5 shrink-0 text-muted" aria-hidden />
+              <span className="min-w-0">
+                <span className="block font-medium break-words">{s.fullName}</span>
+                <span className="block text-sm break-words text-muted">
+                  {s.recordBookNo} · {s.group} · {s.course} курс
+                </span>
               </span>
-            </span>
-          </li>
-        ))}
-      </ul>
+            </li>
+          ))}
+        </ul>
+      </div>
 
       <div id={`${id}-status`} aria-live="polite" className="mt-1.5">
         {q.length > 0 && !enough && !dismissed && <p className="text-sm text-muted">Введите хотя бы {MIN_QUERY} символа.</p>}
@@ -223,11 +242,13 @@ export function StudentSearch({ course, initialQuery = "" }: { course: number; i
           </div>
         )}
         {open && state.status === "done" && results.length === 0 && (
-          <p className="text-sm text-muted">На факультете никого не нашли. Проверьте фамилию или номер зачётки, например 25СЛ0001.</p>
+          <p className="text-sm text-muted">
+            На факультете никого не нашли. Проверьте фамилию или номер зачётки{example ? `, например ${example}` : ""}.
+          </p>
         )}
         {open && state.status === "done" && results.length > 0 && (
           <p className="sr-only">
-            Найдено: {results.length}.{state.exact ? " Номер зачётки совпал — Enter откроет студента." : ""} Стрелки вверх и
+            {state.layout ? `Похоже, включена английская раскладка — ищем «${state.layout}». ` : ""}Найдено: {results.length}.{state.exact ? " Номер зачётки совпал — Enter откроет студента." : ""} Стрелки вверх и
             вниз — выбор, Enter — открыть.
           </p>
         )}

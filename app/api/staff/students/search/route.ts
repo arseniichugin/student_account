@@ -27,11 +27,12 @@ export async function GET(request: Request) {
     return Response.json({ error: "Слишком длинный запрос" } satisfies StudentSearchResponse, { status: 400, headers: NO_STORE });
   }
 
-  const { exact, results } = await searchFacultyStudents(ctx, parsed.data.q, STUDENT_SEARCH_LIMIT);
+  const { exact, results, layout } = await searchFacultyStudents(ctx, parsed.data.q, STUDENT_SEARCH_LIMIT);
   return Response.json(
     {
       exact,
       results: results.map((s) => ({ recordBookNo: s.recordBookNo, fullName: s.fullName, group: s.group.name, course: s.course })),
+      ...(layout ? { layout } : {}),
     } satisfies StudentSearchResponse,
     { headers: NO_STORE },
   );

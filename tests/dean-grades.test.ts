@@ -272,6 +272,59 @@ describe("Поиск студента", () => {
     expect((await searchFacultyStudents(sl, "о")).results).toEqual([]);
     expect((await searchFacultyStudents(sl, `${eva.lastName}${"я".repeat(500)}`)).results).toEqual([]);
   });
+
+  it("точное совпадение зачётки — без шаблонов: %, _ и их смесь с цифрами не открывают случайного студента", async () => {
+    const tail = eva.recordBookNo.slice(-4); // «0001»
+    const masked = `${eva.recordBookNo.slice(0, -1)}_`; // «25СЛ000_»
+    for (const q of ["%", "%%", "_", "__", masked, `%${tail}`, `${eva.recordBookNo.slice(0, 4)}%`, "\\"]) {
+      const r = await searchFacultyStudents(sl, q);
+      expect(r.exact, q).toBeNull();
+      expect(r.results, q).toEqual([]);
+    }
+    // Настоящая зачётка — в любом регистре
+    for (const q of [eva.recordBookNo, eva.recordBookNo.toLowerCase(), eva.recordBookNo.toUpperCase()]) {
+      expect((await searchFacultyStudents(sl, q)).exact, q).toBe(eva.recordBookNo);
+    }
+  });
+
+  it("латиница: зачётка транслитом и буквами-двойниками, фамилия транслитом, английская раскладка", async () => {
+    expect(eva.recordBookNo).toMatch(/^\d{2}СЛ\d{4}$/);
+    const latinBook = `${eva.recordBookNo.slice(0, 2)}SL${eva.recordBookNo.slice(4)}`; // «25SL0001»
+    for (const q of [latinBook, latinBook.toLowerCase()]) {
+      const r = await searchFacultyStudents(sl, q);
+      expect(r.exact, q).toBe(eva.recordBookNo);
+      expect(r.results.map((x) => x.recordBookNo), q).toContain(eva.recordBookNo);
+    }
+    // Начало зачётки латиницей — подсказки
+    const partial = await searchFacultyStudents(sl, latinBook.slice(0, 6));
+    expect(partial.exact).toBeNull();
+    expect(partial.results.length).toBeGreaterThan(0);
+    expect(partial.results.every((x) => x.recordBookNo.startsWith(eva.recordBookNo.slice(0, 6)))).toBe(true);
+
+    // «Орлова» → orlova; с именем — тоже
+    const byName = await searchFacultyStudents(sl, "orlova");
+    expect(byName.results.map((x) => x.recordBookNo)).toContain(eva.recordBookNo);
+    expect(byName.layout).toBeUndefined();
+    expect((await searchFacultyStudents(sl, "Orlova Eva")).results.map((x) => x.recordBookNo)).toContain(eva.recordBookNo);
+
+    // «Орлова» в английской раскладке — «jhkjdf»: находится, и экран узнаёт про раскладку
+    const layout = await searchFacultyStudents(sl, "jhkjdf");
+    expect(layout.results.map((x) => x.recordBookNo)).toContain(eva.recordBookNo);
+    expect(layout.layout).toBe("орлова");
+
+    // Чужой факультет латиницей не находится; мусор латиницей — пусто
+    expect(await searchFacultyStudents(gr, latinBook)).toEqual({ exact: null, results: [] });
+    expect((await searchFacultyStudents(gr, "orlova")).results.map((x) => x.recordBookNo)).not.toContain(eva.recordBookNo);
+    expect(await searchFacultyStudents(sl, "zzqqxx")).toEqual({ exact: null, results: [] });
+    expect((await searchFacultyStudents(sl, "o%")).results).toEqual([]);
+  });
+
+  it("пример зачётки в подсказках — из данных факультета, а не один на всех", async () => {
+    const [slo, gro] = await Promise.all([getCourseOverview(sl, 2), getCourseOverview(gr, 1)]);
+    expect(slo!.sampleRecordBook).toMatch(/СЛ/);
+    expect(gro!.sampleRecordBook).toMatch(/ГР/);
+    expect(await isFacultyStudent(sl, slo!.sampleRecordBook!)).toBe(true);
+  });
 });
 
 // ─── Роли: страницы и API ──────────────────────────────────────────
@@ -307,6 +360,10 @@ describe("Студент и преподаватель не получают д�
     expect(body.exact).toBe(eva.recordBookNo);
     expect(Object.keys(body.results[0]!).sort()).toEqual(["course", "fullName", "group", "recordBookNo"]);
     expect((await search("x".repeat(65))).status).toBe(400);
+    expect(((await (await search("%%")).json()) as { exact: string | null }).exact).toBeNull();
+    const layout = (await (await search("jhkjdf")).json()) as { layout?: string; results: { recordBookNo: string }[] };
+    expect(layout.layout).toBe("орлова");
+    expect(layout.results.map((x) => x.recordBookNo)).toContain(eva.recordBookNo);
 
     as(await user("dekanat.gr"));
     const other = (await (await search(eva.recordBookNo)).json()) as { exact: string | null; results: unknown[] };

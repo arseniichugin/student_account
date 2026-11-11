@@ -13,7 +13,13 @@ export const studentSearchSchema = z.object({
 /** Подсказка поиска студента. Поля перечисляет обработчик явно — лишнее (id, логин, почта) в ответ не попадёт. */
 export type StudentSearchItem = { recordBookNo: string; fullName: string; group: string; course: number };
 
-export type StudentSearchResponse = { exact: string | null; results: StudentSearchItem[] } | { error: string };
+/** layout — запрос нашёлся только в русской раскладке («jhkjdf» → «орлова»): экран подскажет про раскладку. */
+export type StudentSearchResponse =
+  | { exact: string | null; results: StudentSearchItem[]; layout?: string }
+  | { error: string };
+
+/** Короче — не ищем: подсказка «Введите хотя бы 2 символа» (и в поле, и на странице после Enter). */
+export const STUDENT_SEARCH_MIN_LENGTH = 2;
 
 /** Адрес страницы студента для деканата: номер зачётки — в адресе, кириллица кодируется. */
 export const deanStudentHref = (recordBookNo: string, semester?: number | null) =>

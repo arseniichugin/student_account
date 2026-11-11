@@ -9,6 +9,7 @@ import {
   type SemesterAssignmentRow,
 } from "@/lib/data/grades";
 import { escapeLike } from "@/lib/data/schedule";
+import { hasLatin, isTranslitWord, latinKey, latinLookalikesToCyrillic, qwertyToCyrillic } from "@/lib/latin-search";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import {
   cohortSummary,
@@ -21,7 +22,7 @@ import {
 import type { ScoredGrade } from "@/lib/grades/scale";
 import { currentCheckpoint, semesterForCourse, type CheckpointNo } from "@/lib/grades/term";
 import { moscowToday } from "@/lib/moscow-time";
-import { STUDENT_SEARCH_LIMIT, STUDENT_SEARCH_MAX_LENGTH } from "@/lib/validation/dean-grades";
+import { STUDENT_SEARCH_LIMIT, STUDENT_SEARCH_MAX_LENGTH, STUDENT_SEARCH_MIN_LENGTH } from "@/lib/validation/dean-grades";
 
 // Успеваемость для деканата (только чтение).
 // ПРАВИЛА:
@@ -74,6 +75,8 @@ export type CourseOverview = {
   risk: RiskStudent[];
   /** Дисциплины, по которым есть долги, — для фильтра группы риска */
   riskDisciplines: { id: string; name: string; count: number }[];
+  /** Пример номера зачётки для подсказок поиска — первая зачётка курса (у каждого факультета своя) */
+  sampleRecordBook: string | null;
 };
 
 /** Средний балл студента по дисциплине; average = null — «нет оценок». */
@@ -111,6 +114,8 @@ export type StudentSearchResult = {
   /** Зачётка совпала полностью — сразу открыть студента */
   exact: string | null;
   results: DeanStudent[];
+  /** Нашлось только в русской раскладке: исправленный запрос («jhkjdf» → «орлова») — для подсказки про раскладку */
+  layout?: string;
 };
 
 // ─── Помощники ──────────────────────────────────────────────────────
@@ -322,6 +327,7 @@ export async function getCourseOverview(ctx: StaffContext, course?: number | str
     journals,
     risk,
     riskDisciplines,
+    sampleRecordBook: students.map((s) => s.recordBookNo).sort()[0] ?? null,
   };
 }
 
@@ -405,10 +411,25 @@ export async function getFacultyStudentGrades(
 
 // ─── Поиск ──────────────────────────────────────────────────────────
 
+/** Зачётка без учёта регистра и без шаблонов: «%» и «_» — обычные символы (ILIKE с экранированием = точное равенство). */
+const recordBookEquals = (v: string) => ({ recordBookNo: { equals: escapeLike(v), mode: "insensitive" as const } });
+
+/** Студенты факультета для поиска «латиницей» — только имена и зачётки (факультет — сотни строк). */
+const loadSearchIndex = (ctx: StaffContext) =>
+  db.student.findMany({
+    where: { facultyId: ctx.facultyId },
+    select: { id: true, recordBookNo: true, lastName: true, firstName: true, middleName: true },
+  });
+type SearchIndexRow = Awaited<ReturnType<typeof loadSearchIndex>>[number];
+
 /**
- * Поиск студента своего факультета: по номеру зачётки (полное совпадение — exact, без учёта регистра)
- * и по ФИО (каждое слово — начало или часть фамилии, имени, отчества или зачётки). До 3 слов,
- * запрос до 64 символов, не больше 10 подсказок; % и _ экранируются (Prisma передаёт contains в ILIKE как есть).
+ * Поиск студента своего факультета: по номеру зачётки (полное совпадение — exact, без учёта регистра
+ * и без шаблонов) и по ФИО (каждое слово — часть фамилии, имени, отчества или зачётки). До 3 слов,
+ * запрос до 64 символов, от 2 символов, не больше 10 подсказок; % и _ — обычные символы, а не шаблон LIKE.
+ *
+ * Латиница: «25SL0001» и «25CЛ0001» находят 25СЛ0001 (транслит и буквы-двойники), «orlova» — Орлову (транслит,
+ * как в логинах); если и так ничего — пробуем английскую раскладку («jhkjdf» → «орлова») и возвращаем layout —
+ * исправленный запрос, чтобы экран подсказал «Похоже, включена английская раскладка».
  */
 export async function searchFacultyStudents(
   ctx: StaffContext,
@@ -418,29 +439,74 @@ export async function searchFacultyStudents(
   const q = query.trim().replace(/\s+/g, " ").slice(0, STUDENT_SEARCH_MAX_LENGTH);
   if (q === "") return { exact: null, results: [] };
   const take = Math.min(Math.max(limit, 1), STUDENT_SEARCH_LIMIT);
+  const latin = hasLatin(q);
+  let index: Promise<SearchIndexRow[]> | null = null;
+  const getIndex = () => (index ??= loadSearchIndex(ctx));
 
-  const exact = isPlausibleRecordBook(q)
-    ? await db.student.findFirst({
-        where: { facultyId: ctx.facultyId, recordBookNo: { equals: q, mode: "insensitive" } },
-        select: { recordBookNo: true },
-      })
-    : null;
+  // Точное совпадение зачётки: как есть, латинские двойники → кириллица, транслит («25SL0001»)
+  let exact: string | null = null;
+  if (isPlausibleRecordBook(q)) {
+    const variants = [...new Set([q, latinLookalikesToCyrillic(q)])];
+    const row = await db.student.findFirst({
+      where: { facultyId: ctx.facultyId, OR: variants.map(recordBookEquals) },
+      select: { recordBookNo: true },
+    });
+    exact = row?.recordBookNo ?? null;
+    if (!exact && latin && isTranslitWord(q)) {
+      const key = latinKey(q);
+      exact = (await getIndex()).find((s) => latinKey(s.recordBookNo) === key)?.recordBookNo ?? null;
+    }
+  }
+  if (q.length < STUDENT_SEARCH_MIN_LENGTH) return { exact, results: [] };
 
+  const byWords = (text: string) =>
+    db.student.findMany({
+      where: {
+        facultyId: ctx.facultyId,
+        AND: text
+          .split(" ")
+          .slice(0, 3)
+          .map((w) => {
+            const contains = { contains: escapeLike(w), mode: "insensitive" as const };
+            return { OR: [{ lastName: contains }, { firstName: contains }, { middleName: contains }, { recordBookNo: contains }] };
+          }),
+      },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }, { recordBookNo: "asc" }],
+      take,
+      select: studentSelect,
+    });
+
+  const rows = await byWords(q);
+  if (rows.length > 0 || !latin) return { exact, results: rows.map(toDeanStudent) };
+
+  // Латиница не нашлась как есть: транслит («orlova», «25sl00») …
   const words = q.split(" ").slice(0, 3);
-  const rows =
-    q.length < 2
-      ? []
-      : await db.student.findMany({
-          where: {
-            facultyId: ctx.facultyId,
-            AND: words.map((w) => {
-              const contains = { contains: escapeLike(w), mode: "insensitive" as const };
-              return { OR: [{ lastName: contains }, { firstName: contains }, { middleName: contains }, { recordBookNo: contains }] };
-            }),
-          },
-          orderBy: [{ lastName: "asc" }, { firstName: "asc" }, { recordBookNo: "asc" }],
-          take,
-          select: studentSelect,
-        });
-  return { exact: exact?.recordBookNo ?? null, results: rows.map(toDeanStudent) };
+  if (words.every(isTranslitWord)) {
+    const keys = words.map(latinKey);
+    const looks = words.map(latinLookalikesToCyrillic);
+    const ids = (await getIndex())
+      .filter((s) => {
+        const fields = [s.lastName, s.firstName, s.middleName ?? "", s.recordBookNo].map(latinKey);
+        const book = s.recordBookNo.toUpperCase();
+        return keys.every((k, i) => fields.some((f) => f.includes(k)) || book.includes(looks[i]!));
+      })
+      .map((s) => s.id);
+    if (ids.length > 0) {
+      const found = await db.student.findMany({
+        where: { id: { in: ids }, facultyId: ctx.facultyId },
+        orderBy: [{ lastName: "asc" }, { firstName: "asc" }, { recordBookNo: "asc" }],
+        take,
+        select: studentSelect,
+      });
+      return { exact, results: found.map(toDeanStudent) };
+    }
+  }
+
+  // … и английская раскладка («jhkjdf» → «орлова»)
+  const layout = qwertyToCyrillic(q);
+  if (layout && layout.trim().length >= STUDENT_SEARCH_MIN_LENGTH) {
+    const fixed = await byWords(layout.trim().replace(/\s+/g, " "));
+    if (fixed.length > 0) return { exact, results: fixed.map(toDeanStudent), layout: layout.trim() };
+  }
+  return { exact, results: [] };
 }
