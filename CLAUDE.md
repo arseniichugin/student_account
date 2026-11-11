@@ -101,7 +101,10 @@ app/global-error.tsx     сбой корневого layout (свои <html>/<bo
 app/(app)/               кабинет: layout (requireUser) рисует оболочку и меню по роли; error.tsx — ошибка страницы, «Повторить»
 app/(app)/(student)/     страницы студента: today, requests, profile (layout + КАЖДАЯ страница — requireStudent)
 app/(app)/(student)/grades/  оценки студента текущего семестра (requireStudent, getMyGrades)
-app/(app)/(staff)/staff/ кабинет сотрудника деканата (requireStaff)
+app/(app)/(staff)/staff/ кабинет сотрудника деканата (layout + КАЖДАЯ страница — requireStaff): (requests) — заявки факультета
+                         (/staff; loading.tsx в группе, чтобы не оборачивал grades/*), actions.ts, status-form.tsx;
+                         grades/(overview) — обзор курса и поиск студента (/staff/grades?course=N&q=…), grades/group/[groupId]
+                         и grades/student/[recordBookNo] — layout сегмента проверяет «свой факультет» до loading → чужой — HTTP 404
 app/(app)/(teacher)/     кабинет преподавателя (layout + КАЖДАЯ страница — requireTeacher): journal/(list) — список групп,
                          journal/[assignmentId] — журнал (layout сегмента проверяет принадлежность до loading → чужой id —
                          настоящий HTTP 404; страница — ещё раз; список вынесен в группу (list), чтобы его loading.tsx
@@ -110,17 +113,21 @@ app/(app)/(teacher)/     кабинет преподавателя (layout + К�
 app/(app)/schedule/      расписание группы/преподавателя — все роли (requireUser); преподавателю по умолчанию — своё
 app/(app)/map/           карта кампуса — все роли (requireUser)
 app/api/schedule/search/ подсказки поиска (getUserContext → 401 без сессии; студентов не возвращает)
+app/api/staff/students/search/  поиск студента для деканата (401 без входа, 403 не деканату; только свой факультет)
 lib/navigation.ts        меню для каждой роли — ЕДИНСТВЕННОЕ место, где перечислены разделы
 lib/auth/                сессии, пароли, ограничение попыток, guards, серверные действия входа;
                          action-limit.ts — лимит частоты серверных действий (в памяти процесса)
 lib/data/                ЕДИНСТВЕННОЕ место запросов к базе из страниц; всё фильтруется по контексту
 lib/data/schedule.ts     расписание: личное (StudentContext), группы/преподавателя и поиск (UserContext)
 lib/data/schedule-moves.ts  заглушки «Перенесено на …» (те же myGroupIds/checkRange из schedule.ts)
-lib/data/grades.ts       оценки: getMyGrades / getMyGradesDigest (StudentContext), getMyAssignments / getJournal / saveGrades (TeacherContext)
+lib/data/grades.ts       оценки: getMyGrades / getMyGradesDigest (StudentContext), getMyAssignments / getJournal / saveGrades (TeacherContext);
+                         buildSemesterGrades — ОДИН расчёт средних и долгов для студента и деканата
+lib/data/dean-grades.ts  успеваемость для деканата (StaffContext, фильтр ctx.facultyId): обзор курса, группа, студент по зачётке, поиск
 lib/grades/              чистые функции: scale.ts (шкала ECTS, средние, цвета букв), term.ts (семестр, срезы),
                          notification.ts (текст уведомления «Новая оценка»), stats.ts (долг по дисциплине hasFailing —
-                         сданный экзамен/зачёт гасит FX/F за срезы; данные графиков, подписи)
-lib/validation/          схемы Zod
+                         сданный экзамен/зачёт гасит FX/F за срезы; данные графиков, подписи), course-stats.ts (сводка курса/группы
+                         для деканата: средний, распределение по буквам, долги, заполнение среза)
+lib/validation/          схемы Zod; dean-grades.ts — поиск студента и адреса страниц деканата
 lib/university-data/     разбор и проверка файлов вуза, импорт в базу (без server-only — нужен скрипту)
 lib/moscow-time.ts       даты «YYYY-MM-DD» и время по Москве
 lib/schedule/            чистые функции экранов расписания: разбор ?date/?view, «через N мин», адреса
@@ -133,6 +140,7 @@ components/schedule/     LessonCard / LessonList, неделя, навигаци
 components/grades/       экран «Оценки» студента: сводка, графики (свой SVG), карточка дисциплины, переключатель семестров,
                          блок «Оценки» на «Сегодня», скелетон
 components/journal/      журнал преподавателя: карточки групп, редактор оценок (таблица на компьютере, карточки на телефоне)
+components/dean-grades/  «Успеваемость» деканата: сводка, распределение (SVG), группы, журналы, группа риска, таблица группы, поиск
 components/error-screen.tsx  полноэкранная страница ошибки для app/error.tsx и app/global-error.tsx
 components/campus-map/   обёртка карты кампуса для React (грузит public/campus-map/)
 public/campus-map/       карта кампуса без зависимостей (campus-map.js / .css) — уходит в браузер
