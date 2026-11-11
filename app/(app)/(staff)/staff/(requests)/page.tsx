@@ -11,7 +11,7 @@ import { countFacultyRequestsByStatus, listFacultyRequests } from "@/lib/data/re
 import type { RequestStatus } from "@/lib/generated/prisma/enums";
 import { cn, formatDateTime } from "@/lib/utils";
 import { REQUEST_STATUSES } from "@/lib/validation/requests";
-import { StatusForm } from "./status-form";
+import { StatusForm } from "../status-form";
 
 export const metadata: Metadata = { title: "Заявки студентов" };
 

@@ -16,9 +16,12 @@ import { cn } from "@/lib/utils";
 export function DisciplineCard({
   discipline: d,
   currentCheckpoint,
+  viewer = "student",
 }: {
   discipline: MyDisciplineGrades;
   currentCheckpoint: CheckpointNo | null;
+  /** Деканат (только чтение) — без советов студенту «спросите…» */
+  viewer?: "student" | "staff";
 }) {
   const issues = disciplineIssues(d);
   const problem = issues.checkpoints.length > 0 || issues.final;
@@ -50,7 +53,7 @@ export function DisciplineCard({
       {problem && (
         <p className="flex items-start gap-2 rounded-xl bg-grade-fx-soft px-3 py-2 text-sm text-grade-fx">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
-          <span>{issueText(d, issues)}</span>
+          <span>{issueText(d, issues, viewer)}</span>
         </p>
       )}
       {issues.settled.length > 0 && (
@@ -184,7 +187,7 @@ function checkpointList(d: MyDisciplineGrades, nos: readonly CheckpointNo[]): st
  * Пояснение к непогашенному долгу: что не так и что это значит. FX — «можно пересдать»,
  * F — «нужно повторить курс» (как в шкале lib/grades/scale.ts); «не зачтено» — зачёт можно пересдать.
  */
-function issueText(d: MyDisciplineGrades, issues: DisciplineIssues): string {
+function issueText(d: MyDisciplineGrades, issues: DisciplineIssues, viewer: "student" | "staff"): string {
   const parts: string[] = [];
   for (const letter of ["FX", "F"] as const) {
     const nos = issues.checkpoints.filter((no) => d.checkpoints[no - 1]!.letter === letter);
@@ -199,9 +202,12 @@ function issueText(d: MyDisciplineGrades, issues: DisciplineIssues): string {
     );
   }
   const text = parts.join("; ");
-  const ask = /повторить курс/.test(text)
-    ? " Спросите в деканате, как это сделать."
-    : " Спросите преподавателя семинаров, когда пересдача.";
+  const ask =
+    viewer === "staff"
+      ? ""
+      : /повторить курс/.test(text)
+        ? " Спросите в деканате, как это сделать."
+        : " Спросите преподавателя семинаров, когда пересдача.";
   const closes = d.final ? ` Долг по срезам закроет сданный ${d.final.kind === "CREDIT" ? "зачёт" : "экзамен"}.` : "";
   const fixed =
     issues.checkpoints.length > 0 && !issues.final && d.average && !isFailingLetter(d.average.letter)

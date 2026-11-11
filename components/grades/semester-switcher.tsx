@@ -2,8 +2,12 @@ import Link from "next/link";
 import { SemesterScroller } from "@/components/grades/semester-scroller";
 import { cn } from "@/lib/utils";
 
-/** Адрес семестра: текущий — просто /grades, прошлый — /grades?semester=N. */
-export const semesterHref = (n: number, current: number) => (n === current ? "/grades" : `/grades?semester=${n}`);
+/**
+ * Адрес семестра: текущий — просто /grades, прошлый — /grades?semester=N.
+ * basePath — другой экран с теми же семестрами (оценки студента у деканата: /staff/grades/student/<зачётка>).
+ */
+export const semesterHref = (n: number, current: number, basePath = "/grades") =>
+  n === current ? basePath : `${basePath}?semester=${n}`;
 
 /** С какого числа семестров сегменты на телефоне перестают помещаться и ряд прокручивается (4-й курс — 7). */
 const SCROLL_FROM = 6;
@@ -19,11 +23,14 @@ export function SemesterSwitcher({
   semesters,
   current,
   shown,
+  basePath,
   className,
 }: {
   semesters: number[];
   current: number;
   shown: number;
+  /** Адрес экрана без ?semester (по умолчанию /grades) */
+  basePath?: string;
   className?: string;
 }) {
   if (semesters.length < 2) return null;
@@ -46,7 +53,7 @@ export function SemesterSwitcher({
           return (
             <li key={n} className={cn("flex-1 shrink-0 lg:flex-none", isCurrent ? "min-w-[4.5rem]" : "min-w-12")}>
               <Link
-                href={semesterHref(n, current)}
+                href={semesterHref(n, current, basePath)}
                 aria-current={active ? "page" : undefined}
                 className={cn(
                   "relative flex min-h-11 flex-col items-center justify-center rounded-lg px-1.5 text-[15px] leading-tight font-medium whitespace-nowrap transition-colors lg:min-w-16 lg:px-3",
