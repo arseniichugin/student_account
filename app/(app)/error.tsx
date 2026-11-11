@@ -22,7 +22,7 @@ export default function AppError({ error, retry }: { error: unknown; retry: () =
       <AlertTriangle className="size-10 text-danger" aria-hidden />
       <h1 className="mt-3 text-[22px] font-bold">Не удалось загрузить страницу</h1>
       <p className="mt-1 max-w-sm text-sm text-muted">
-        Проверьте интернет и попробуйте ещё раз. Если ошибка повторяется — сообщите в деканат.
+        Проверьте интернет и попробуйте ещё раз. Если не помогло — попробуйте через минуту.
       </p>
       {digest && <p className="mt-2 text-xs text-muted">Код ошибки: {digest}</p>}
       <Button type="button" variant="secondary" className="mt-5" onClick={() => retry()}>

@@ -7,13 +7,20 @@
  *   npm run data:import -- --credentials файл   — куда записать логины и пароли (или env CREDENTIALS_FILE)
  *
  * Переменные окружения: DATABASE_URL, DEMO_PASSWORD (пароль тестовых аккаунтов и деканатов,
- * по умолчанию Hogwarts2026), TEST_STUDENT_LOGINS (логины тестовых студентов через запятую).
+ * по умолчанию Hogwarts2026), TEST_STUDENT_LOGINS (логины тестовых студентов через запятую),
+ * TEST_TEACHER_LOGINS (логины тестовых преподавателей через запятую).
  * Формат файлов и что делает импорт — data/university/README.md.
  */
 import "dotenv/config";
 import path from "node:path";
 import { createPrismaClient } from "@/lib/prisma-client";
-import { DEFAULT_DEMO_PASSWORD, ImportError, importUniversityData, testLoginsFromEnv } from "@/lib/university-data/import";
+import {
+  DEFAULT_DEMO_PASSWORD,
+  ImportError,
+  importUniversityData,
+  testLoginsFromEnv,
+  testTeacherLoginsFromEnv,
+} from "@/lib/university-data/import";
 import { loadUniversityData, universityDataDir } from "@/lib/university-data/load";
 import { formatIssue } from "@/lib/university-data/validate";
 import { plural } from "@/lib/utils";
@@ -73,6 +80,7 @@ async function main(): Promise<number> {
     const summary = await importUniversityData(db, d, {
       demoPassword: process.env.DEMO_PASSWORD || DEFAULT_DEMO_PASSWORD,
       testLogins: testLoginsFromEnv(),
+      testTeacherLogins: testTeacherLoginsFromEnv(),
       credentialsPath,
       log: (m) => console.log(`  ${m}`),
     });
@@ -81,8 +89,17 @@ async function main(): Promise<number> {
     console.log(
       `\nГотово за ${seconds} с.\n` +
         `  Студентов: ${n(summary.students)} (новых аккаунтов ${n(summary.createdAccounts)}, удалено ${n(summary.removedStudents)})\n` +
-        `  Занятий: ${n(summary.lessons)} (связей «занятие — группа» ${n(summary.lessonGroups)})`,
+        `  Занятий: ${n(summary.lessons)} (связей «занятие — группа» ${n(summary.lessonGroups)})
+` +
+        `  Преподавателей: ${n(summary.teachers)}, с аккаунтом ${n(summary.teacherAccounts)} ` +
+        `(новых ${n(summary.createdTeacherAccounts)}); назначений «преподаватель — дисциплина — группа» ${n(summary.assignments)}`,
     );
+    if (summary.resetTestTeachers > 0) {
+      console.log(
+        `  Бывшим тестовым преподавателям выдан новый случайный пароль: ${n(summary.resetTestTeachers)} ` +
+          "(демо-пароль у них больше не работает)",
+      );
+    }
     if (summary.resetTestStudents > 0) {
       console.log(
         `  Бывшим тестовым студентам выдан новый случайный пароль: ${n(summary.resetTestStudents)} ` +
@@ -97,6 +114,10 @@ async function main(): Promise<number> {
     console.log("\nТестовые аккаунты для жюри (пароль — DEMO_PASSWORD):");
     for (const s of summary.testStudents) {
       console.log(`  студент  ${s.login.padEnd(30)} ${s.fullName}, ${s.faculty}, ${s.course} курс, ${s.group}`);
+    }
+    for (const t of summary.testTeachers) {
+      const groups = t.groups.length > 4 ? `${t.groups.slice(0, 4).join(", ")} и ещё ${t.groups.length - 4}` : t.groups.join(", ");
+      console.log(`  препод.  ${t.login.padEnd(30)} ${t.fullName}${t.rank ? `, ${t.rank}` : ""}; группы: ${groups}`);
     }
     for (const s of summary.staff) console.log(`  деканат  ${s.login.padEnd(30)} ${s.fullName}, ${s.faculty}`);
     console.log(process.env.DEMO_PASSWORD ? "  Пароль: из DEMO_PASSWORD" : `  Пароль: ${DEFAULT_DEMO_PASSWORD}`);

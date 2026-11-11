@@ -48,7 +48,16 @@ export function AppShell({
             </span>
             <span className="min-w-0 flex-1">
               <span className="block text-sm leading-snug font-medium break-words">{user.name}</span>
-              <span className="block text-xs leading-snug text-muted">{user.meta}</span>
+              {/* Короткие части «ГР · 1 курс · 1-ГР-1» не разрываются внутри (номер группы — по дефису),
+                  перенос — между частями; длинные (должность преподавателя) переносятся как обычно */}
+              <span className="block text-xs leading-snug text-muted">
+                {user.meta.split(" · ").map((part, i) => (
+                  <span key={i}>
+                    {i > 0 && " · "}
+                    <span className={cn(part.length <= 16 && "whitespace-nowrap")}>{part}</span>
+                  </span>
+                ))}
+              </span>
             </span>
             <LogoutButton />
           </div>

@@ -1,25 +1,29 @@
 "use client";
 
-import { CalendarDays, FileText, Inbox, MapPinned, Sun, UserRound } from "lucide-react";
+import { CalendarDays, FileText, GraduationCap, Inbox, MapPinned, NotebookPen, Sun, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { isNavActive, type NavIcon, type NavItem } from "@/lib/navigation";
+import { activeNavHref, type NavIcon, type NavItem } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
 // Иконки задаются строкой: серверный компонент не может передать функцию в клиентский.
 const ICONS: Record<NavIcon, typeof Sun> = {
   sun: Sun,
   calendar: CalendarDays,
+  grades: GraduationCap,
   map: MapPinned,
   file: FileText,
   user: UserRound,
   inbox: Inbox,
+  journal: NotebookPen,
 };
 
 const STYLES = {
   bottom: {
     list: "flex",
-    item: "min-w-0 flex-1",
+    // flex-auto, а не flex-1: длинная подпись («Расписание») берёт чуть больше места, короткие — меньше.
+    // Так 6 пунктов студента помещаются на 360 px без обрезки; min-w-11 — область нажатия не уже 44 px.
+    item: "min-w-11 flex-auto",
     link: "flex min-h-14 flex-col items-center justify-center gap-0.5 px-0.5 text-[11px] font-medium",
     active: "text-primary",
     idle: "text-muted hover:text-text",
@@ -38,12 +42,13 @@ const STYLES = {
 export function NavLinks({ items, variant }: { items: NavItem[]; variant: keyof typeof STYLES }) {
   const pathname = usePathname();
   const s = STYLES[variant];
+  const activeHref = activeNavHref(items, pathname);
 
   return (
     <ul className={s.list}>
       {items.map(({ href, label, icon }) => {
         const Icon = ICONS[icon];
-        const active = isNavActive(href, pathname);
+        const active = href === activeHref;
         return (
           <li key={href} className={s.item}>
             <Link

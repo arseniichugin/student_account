@@ -76,7 +76,28 @@ export type StudentData = {
   academicGroup: string;
   languageGroups: string[];
 };
-export type TeacherData = { oid: string; shortName: string; fullName: string; rank: string | null; email: string | null };
+export type TeacherData = {
+  oid: string;
+  shortName: string;
+  fullName: string;
+  rank: string | null;
+  email: string | null;
+  /** Логин аккаунта — часть почты до «@»; null — почты нет или из неё не получается логин (аккаунта не будет) */
+  login: string | null;
+};
+export type FinalKindValue = "EXAM" | "CREDIT";
+/**
+ * Назначение «преподаватель × дисциплина × группа»: кто ставит оценки (правило — SEMINAR_KINDS).
+ * finalKind и finalDate — итоговый контроль пары «дисциплина × группа» из расписания.
+ */
+export type AssignmentData = {
+  teacherOid: string;
+  discipline: string;
+  group: string;
+  finalKind: FinalKindValue | null;
+  /** «YYYY-MM-DD» */
+  finalDate: string | null;
+};
 export type BuildingData = {
   key: string;
   name: string;
@@ -131,6 +152,8 @@ export type UniversityDataset = {
   rooms: RoomData[];
   disciplines: DisciplineData[];
   lessons: LessonData[];
+  /** Кто ставит оценки: из занятий «Семинар» / «Практическое занятие» (без разовых замен) */
+  assignments: AssignmentData[];
   /** Сколько строк было в schedule.csv (одна строка = занятие × группа) */
   scheduleRows: number;
 };
@@ -830,7 +853,8 @@ function buildDataset(
   const disciplines = new Map<string, DisciplineData>();
   const lessons = new Map<string, LessonData>();
 
-  for (const { row } of schedule.rows) {
+  const teacherLine = new Map<string, number>();
+  for (const { row, line } of schedule.rows) {
     const building = resolveBuilding(row.building);
     let room: RoomData | null = null;
     if (row.auditorium !== "") {
@@ -868,7 +892,9 @@ function buildDataset(
           fullName,
           rank,
           email: row.lecturerEmail || null,
+          login: null,
         });
+        teacherLine.set(teacherOid, line);
       }
     }
     if (!disciplines.has(row.discipline)) disciplines.set(row.discipline, { name: row.discipline, oid: row.disciplineOid || null });
@@ -900,6 +926,9 @@ function buildDataset(
       groups: [row.group],
     });
   }
+
+  const assignments = buildAssignments([...lessons.values()], issues);
+  assignTeacherLogins(teachers, teacherLine, students, issues);
 
   const list = (s: Set<string>) => {
     const arr = [...s].sort();
@@ -933,8 +962,114 @@ function buildDataset(
     rooms,
     disciplines: [...disciplines.values()],
     lessons: [...lessons.values()],
+    assignments,
     scheduleRows: schedule.totalRows,
   };
+}
+
+// ─── Преподаватели: аккаунты и назначения ───────────────────────────
+
+const normKind = (kind: string) => kind.trim().toLowerCase().replaceAll("ё", "е");
+
+/** Виды работ, которые ведёт «свой» преподаватель группы — он и ставит оценки. Лектор потока — нет. */
+export const SEMINAR_KINDS: readonly string[] = ["Семинар", "Практическое занятие"];
+/** Итоговый контроль: занятие такого вида в расписании пары «дисциплина × группа». */
+export const FINAL_KINDS: Readonly<Record<string, FinalKindValue>> = { Экзамен: "EXAM", Зачёт: "CREDIT" };
+
+const SEMINAR = new Set(SEMINAR_KINDS.map(normKind));
+const FINAL = new Map(Object.entries(FINAL_KINDS).map(([k, v]) => [normKind(k), v]));
+
+/**
+ * Назначения: преподаватель ведёт у группы «Семинар» или «Практическое занятие» по дисциплине;
+ * разовая замена (status REPLACED) не считается. Итоговый контроль — занятие «Экзамен» (важнее)
+ * или «Зачёт» этой же пары; дата — самое раннее неотменённое такое занятие.
+ */
+function buildAssignments(lessons: LessonData[], issues: Issues): AssignmentData[] {
+  const pairKey = (discipline: string, group: string) => `${discipline}\u0000${group}`;
+  const teachersOf = new Map<string, Set<string>>();
+  const finals = new Map<string, LessonData[]>();
+  for (const l of lessons) {
+    const kind = normKind(l.kind);
+    for (const group of l.groups) {
+      const key = pairKey(l.discipline, group);
+      if (SEMINAR.has(kind) && l.teacherOid && l.status !== "REPLACED") {
+        teachersOf.set(key, (teachersOf.get(key) ?? new Set<string>()).add(l.teacherOid));
+      }
+      if (FINAL.has(kind)) finals.set(key, [...(finals.get(key) ?? []), l]);
+    }
+  }
+  const out: AssignmentData[] = [];
+  const withoutFinal: string[] = [];
+  for (const [key, oids] of teachersOf) {
+    const [discipline, group] = key.split("\u0000") as [string, string];
+    const candidates = finals.get(key) ?? [];
+    const finalKind: FinalKindValue | null = candidates.some((l) => FINAL.get(normKind(l.kind)) === "EXAM")
+      ? "EXAM"
+      : candidates.length > 0
+        ? "CREDIT"
+        : null;
+    const dates = candidates
+      .filter((l) => FINAL.get(normKind(l.kind)) === finalKind)
+      .sort((a, b) => Number(a.status === "CANCELLED") - Number(b.status === "CANCELLED") || a.date.localeCompare(b.date));
+    if (!finalKind) withoutFinal.push(`${discipline} — ${group}`);
+    for (const teacherOid of [...oids].sort(compareIds)) {
+      out.push({ teacherOid, discipline, group, finalKind, finalDate: dates[0]?.date ?? null });
+    }
+  }
+  if (withoutFinal.length > 0) {
+    issues.warn({
+      file: SCHEDULE_FILE,
+      message:
+        `${withoutFinal.length} пар «дисциплина — группа» с семинарами без экзамена и зачёта в расписании — ` +
+        `итоговую оценку по ним поставить нельзя: ${withoutFinal.slice(0, 10).join(", ")}${withoutFinal.length > 10 ? "…" : ""}`,
+    });
+  }
+  return out.sort((a, b) => a.discipline.localeCompare(b.discipline, "ru") || a.group.localeCompare(b.group, "ru"));
+}
+
+/**
+ * Логин преподавателя — часть почты до «@» (как у студентов). Почты нет или она странная — аккаунта
+ * не будет (предупреждение). Совпадение с логином студента, деканата или другого преподавателя — ошибка:
+ * иначе войти можно было бы не в тот кабинет.
+ */
+function assignTeacherLogins(
+  teachers: Map<string, TeacherData>,
+  teacherLine: Map<string, number>,
+  students: StudentData[],
+  issues: Issues,
+) {
+  const studentLogins = new Map(students.map((s) => [s.login, s.line]));
+  const taken = new Map<string, string>();
+  const noAccount: string[] = [];
+  for (const t of teachers.values()) {
+    if (!t.email) continue;
+    const email = t.email.toLowerCase();
+    const login = email.split("@")[0]!;
+    if (!EMAIL_RE.test(email) || !LOGIN_RE.test(login)) {
+      noAccount.push(`${t.shortName} (${shown(t.email)})`);
+      continue;
+    }
+    const where = { file: SCHEDULE_FILE, line: teacherLine.get(t.oid) };
+    const err = (message: string) => issues.error({ ...where, message: `преподаватель ${shown(t.fullName)}: ${message}` });
+    if (login.startsWith(STAFF_LOGIN_PREFIX)) {
+      err(`логин ${shown(login)} из почты начинается с «${STAFF_LOGIN_PREFIX}» — такие логины зарезервированы для деканатов`);
+    } else if (studentLogins.has(login)) {
+      err(`логин ${shown(login)} из почты совпадает с логином студента (${STUDENTS_FILE}, строка ${studentLogins.get(login)})`);
+    } else if (taken.has(login)) {
+      err(`логин ${shown(login)} из почты уже есть у преподавателя ${shown(taken.get(login))} — у разных людей должны быть разные адреса`);
+    } else {
+      taken.set(login, t.fullName);
+      t.login = login;
+    }
+  }
+  if (noAccount.length > 0) {
+    issues.warn({
+      file: SCHEDULE_FILE,
+      message:
+        `у ${noAccount.length} преподавателей из почты не получается логин — аккаунта у них не будет: ` +
+        `${noAccount.slice(0, 10).join(", ")}${noAccount.length > 10 ? "…" : ""}`,
+    });
+  }
 }
 
 /** Проверяет все три файла и собирает набор данных. База не используется. */
@@ -956,6 +1091,11 @@ export function validateUniversityData(files: UniversityFiles): ValidationResult
     return { ok: false, errors, errorCount: Math.max(issues.errorCount, 1), warnings, warningCount };
   }
   const data = buildDataset(schedule, studentsResult.students, studentsResult.facultyNames, map, issues);
+  // Перекрёстные проверки при сборке (логины преподавателей) тоже могут найти ошибки
+  if (issues.errorCount > 0) {
+    const { errors, warnings, warningCount } = issues;
+    return { ok: false, errors, errorCount: issues.errorCount, warnings, warningCount };
+  }
   return { ok: true, data, warnings: issues.warnings, warningCount: issues.warningCount };
 }
 
@@ -978,6 +1118,44 @@ export function pickTestStudents(data: Pick<UniversityDataset, "faculties" | "st
     const choice =
       free.find((s) => s.facultyCode === fac && s.course === course) ?? free.find((s) => s.facultyCode === fac) ?? free[0];
     if (choice) picked.push(choice);
+  }
+  return picked;
+}
+
+/**
+ * Тестовые преподаватели для жюри: для i-го тестового студента — семинарист его групп с аккаунтом.
+ * Чтобы жюри увидело оба вида итогового контроля, первому ищем пару с экзаменом, второму — с зачётом.
+ * Порядок выбора: нужный вид контроля → академическая группа студента (полный журнал, а не языковая
+ * подгруппа на 5–9 человек) → больше групп у преподавателя → меньший oid. Один человек дважды не выбирается.
+ */
+export function pickTestTeachers(
+  data: Pick<UniversityDataset, "teachers" | "assignments">,
+  testStudents: Pick<StudentData, "academicGroup" | "languageGroups">[],
+  count = 2,
+): TeacherData[] {
+  const PREFERRED: FinalKindValue[] = ["EXAM", "CREDIT"];
+  const byOid = new Map(data.teachers.map((t) => [t.oid, t]));
+  const load = new Map<string, number>();
+  for (const a of data.assignments) load.set(a.teacherOid, (load.get(a.teacherOid) ?? 0) + 1);
+  const picked: TeacherData[] = [];
+  for (const s of testStudents) {
+    if (picked.length >= count) break;
+    const prefer = PREFERRED[picked.length % PREFERRED.length];
+    const groups = new Set([s.academicGroup, ...s.languageGroups]);
+    const best = data.assignments
+      .filter((a) => groups.has(a.group))
+      .filter((a) => {
+        const t = byOid.get(a.teacherOid);
+        return !!t?.login && !picked.includes(t);
+      })
+      .sort(
+        (a, b) =>
+          Number(b.finalKind === prefer) - Number(a.finalKind === prefer) ||
+          Number(b.group === s.academicGroup) - Number(a.group === s.academicGroup) ||
+          load.get(b.teacherOid)! - load.get(a.teacherOid)! ||
+          compareIds(a.teacherOid, b.teacherOid),
+      )[0];
+    if (best) picked.push(byOid.get(best.teacherOid)!);
   }
   return picked;
 }

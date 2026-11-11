@@ -53,7 +53,7 @@ Next.js 16 (App Router) + TypeScript · React 19 · Tailwind CSS 4 · PostgreSQL
 
 1. **Только вымышленные данные.** Никаких реальных ФИО, оценок, номеров зачёток, логинов.
    Не подключаться к настоящим системам вуза. Парсинг открытых данных (расписание) — можно.
-2. **Студент видит только свои данные.** Любой запрос к данным студента фильтруется
+2. **Студент видит только свои данные; преподаватель — только свои группы** (по `TeachingAssignment`). Любой запрос к данным студента фильтруется
    по `studentId` из сессии, а не по параметру из URL или тела запроса:
    ```ts
    // ❌ id из адреса без проверки владельца
@@ -96,18 +96,38 @@ Next.js 16 (App Router) + TypeScript · React 19 · Tailwind CSS 4 · PostgreSQL
 
 ```
 app/(auth)/login/        вход
-app/(app)/               кабинет: layout (requireUser) рисует оболочку и меню по роли; error.tsx — «Повторить»
+app/error.tsx            сбой общего layout кабинета (например, база недоступна) — русская страница с «Повторить»;
+app/global-error.tsx     сбой корневого layout (свои <html>/<body>); оба рисуют components/error-screen.tsx
+app/(app)/               кабинет: layout (requireUser) рисует оболочку и меню по роли; error.tsx — ошибка страницы, «Повторить»
 app/(app)/(student)/     страницы студента: today, requests, profile (layout + КАЖДАЯ страница — requireStudent)
-app/(app)/(staff)/staff/ кабинет сотрудника деканата (requireStaff)
-app/(app)/schedule/      расписание группы/преподавателя — обе роли (requireUser)
-app/(app)/map/           карта кампуса — обе роли (requireUser)
+app/(app)/(student)/grades/  оценки студента текущего семестра (requireStudent, getMyGrades)
+app/(app)/(staff)/staff/ кабинет сотрудника деканата (layout + КАЖДАЯ страница — requireStaff): (requests) — заявки факультета
+                         (/staff; loading.tsx в группе, чтобы не оборачивал grades/*), actions.ts, status-form.tsx;
+                         grades/(overview) — обзор курса и поиск студента (/staff/grades?course=N&q=…), grades/group/[groupId]
+                         и grades/student/[recordBookNo] — layout сегмента проверяет «свой факультет» до loading → чужой — HTTP 404
+app/(app)/(teacher)/     кабинет преподавателя (layout + КАЖДАЯ страница — requireTeacher): journal/(list) — список групп,
+                         journal/[assignmentId] — журнал (layout сегмента проверяет принадлежность до loading → чужой id —
+                         настоящий HTTP 404; страница — ещё раз; список вынесен в группу (list), чтобы его loading.tsx
+                         не оборачивал журнал). Так же устроены requests/(list) и requests/[id]/layout.tsx у студента;
+                         journal/actions.ts (saveGradesAction: лимит частоты, Zod, проверка назначения), teacher/profile
+app/(app)/schedule/      расписание группы/преподавателя — все роли (requireUser); преподавателю по умолчанию — своё
+app/(app)/map/           карта кампуса — все роли (requireUser)
 app/api/schedule/search/ подсказки поиска (getUserContext → 401 без сессии; студентов не возвращает)
+app/api/staff/students/search/  поиск студента для деканата (401 без входа, 403 не деканату; только свой факультет)
 lib/navigation.ts        меню для каждой роли — ЕДИНСТВЕННОЕ место, где перечислены разделы
-lib/auth/                сессии, пароли, ограничение попыток, guards, серверные действия входа
+lib/auth/                сессии, пароли, ограничение попыток, guards, серверные действия входа;
+                         action-limit.ts — лимит частоты серверных действий (в памяти процесса)
 lib/data/                ЕДИНСТВЕННОЕ место запросов к базе из страниц; всё фильтруется по контексту
 lib/data/schedule.ts     расписание: личное (StudentContext), группы/преподавателя и поиск (UserContext)
 lib/data/schedule-moves.ts  заглушки «Перенесено на …» (те же myGroupIds/checkRange из schedule.ts)
-lib/validation/          схемы Zod
+lib/data/grades.ts       оценки: getMyGrades / getMyGradesDigest (StudentContext), getMyAssignments / getJournal / saveGrades (TeacherContext);
+                         buildSemesterGrades — ОДИН расчёт средних и долгов для студента и деканата
+lib/data/dean-grades.ts  успеваемость для деканата (StaffContext, фильтр ctx.facultyId): обзор курса, группа, студент по зачётке, поиск
+lib/grades/              чистые функции: scale.ts (шкала ECTS, средние, цвета букв), term.ts (семестр, срезы),
+                         notification.ts (текст уведомления «Новая оценка»), stats.ts (долг по дисциплине hasFailing —
+                         сданный экзамен/зачёт гасит FX/F за срезы; данные графиков, подписи), course-stats.ts (сводка курса/группы
+                         для деканата: средний, распределение по буквам, долги, заполнение среза)
+lib/validation/          схемы Zod; dean-grades.ts — поиск студента и адреса страниц деканата
 lib/university-data/     разбор и проверка файлов вуза, импорт в базу (без server-only — нужен скрипту)
 lib/moscow-time.ts       даты «YYYY-MM-DD» и время по Москве
 lib/schedule/            чистые функции экранов расписания: разбор ?date/?view, «через N мин», адреса
@@ -117,18 +137,26 @@ lib/config.ts            UNIVERSITY_NAME (название вуза, env), isDem
 lib/requests/status.ts   подписи статусов заявок (годится и клиенту)
 components/ui/           базовые компоненты (Button, Input, Card, EmptyState, Skeleton…)
 components/schedule/     LessonCard / LessonList, неделя, навигация по датам, поиск, скелетоны
+components/grades/       экран «Оценки» студента: сводка, графики (свой SVG), карточка дисциплины, переключатель семестров,
+                         блок «Оценки» на «Сегодня», скелетон
+components/journal/      журнал преподавателя: карточки групп, редактор оценок (таблица на компьютере, карточки на телефоне)
+components/dean-grades/  «Успеваемость» деканата: сводка, распределение (SVG), группы, журналы, группа риска, таблица группы, поиск
+components/error-screen.tsx  полноэкранная страница ошибки для app/error.tsx и app/global-error.tsx
 components/campus-map/   обёртка карты кампуса для React (грузит public/campus-map/)
 public/campus-map/       карта кампуса без зависимостей (campus-map.js / .css) — уходит в браузер
 tools/                   генераторы данных: schedule-generator/, campus-map/ (не попадают в Docker-образ)
 secrets/                 только на сервере (Docker): credentials.csv от импорта — НЕ коммитить
 data/university/         ЗАМЕНЯЕМЫЕ файлы вуза: students.csv, schedule.csv, campus-map.json (+ README с форматом)
 scripts/                 import-university-data.ts — команда npm run data:import
-prisma/schema.prisma     схема базы; prisma/seed.ts — демо-контент поверх импорта (заявки, оценки, объявления)
-tests/                   автотесты безопасности, импорта и расписания (Vitest); tests/fixtures — маленький набор файлов вуза
+prisma/schema.prisma     схема базы; prisma/seed.ts — демо-контент поверх импорта (заявки, оценки, объявления);
+                         на сервере пересоздаётся каждый час (docs/DEPLOYMENT.md §6)
+tests/                   автотесты безопасности, оценок, импорта и расписания (Vitest); tests/fixtures — маленький набор файлов вуза
 ```
 
 Новые запросы к данным — **только** в `lib/data/*`, функция принимает `StudentContext`,
-`StaffContext` или `UserContext` (любой вошедший, `requireUser()`) из `lib/auth/guards.ts`, а не голый id.
+`StaffContext`, `TeacherContext` или `UserContext` (любой вошедший, `requireUser()`) из `lib/auth/guards.ts`, а не голый id.
+Роли: `STUDENT`, `STAFF`, `TEACHER` (преподаватель из `schedule.csv`, аккаунт создаёт импорт; оценки ставит только
+по своим назначениям `TeachingAssignment` — семинары и практические занятия группы).
 Не хардкодь названия факультетов, групп и дисциплин — бери их из базы.
 
 ## Команды
@@ -146,9 +174,10 @@ tests/                   автотесты безопасности, импор
 | `npm run build` | Продакшен-сборка |
 
 Тестовые аккаунты (основной набор данных), пароль `Hogwarts2026` (`DEMO_PASSWORD`):
-студенты `larisa.sharova26` (Гриффиндор, 1 курс), `eva.orlova25` (Слизерин, 2 курс, есть долг),
-`yaroslav.shestakov24` (Когтевран, 3 курс); деканаты `dekanat.gr`, `dekanat.sl`, `dekanat.kg`, `dekanat.pf`.
-Пароли остальных студентов — в `credentials.csv` (создаёт импорт).
+студенты `larisa.sharova26` (Гриффиндор, 1 курс), `eva.orlova25` (Слизерин, 2 курс, FX за 1-й срез),
+`yaroslav.shestakov24` (Когтевран, 3 курс); преподаватели `y.yudin` (экзамен, группа Ларисы без 2-го среза),
+`s.semenov` (зачёт, группа Евы); деканаты `dekanat.gr`, `dekanat.sl`, `dekanat.kg`, `dekanat.pf`.
+Пароли остальных студентов и преподавателей — в `credentials.csv` (создаёт импорт).
 
 ## Проверка в браузере
 
