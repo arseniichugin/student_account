@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ChevronRight, GraduationCap, SearchX, X } from "lucide-react";
-import { CohortSummaryCard } from "@/components/dean-grades/cohort-summary";
+import { CohortSummaryCard, studentsLabel } from "@/components/dean-grades/cohort-summary";
 import { CourseGroups } from "@/components/dean-grades/course-groups";
 import { CourseSwitcher } from "@/components/dean-grades/course-switcher";
 import { JournalFillList } from "@/components/dean-grades/journal-fill";
@@ -116,7 +116,7 @@ export default async function DeanGradesPage({ searchParams }: PageProps<"/staff
 
       <section aria-labelledby="course-title" className="space-y-4">
         <h2 id="course-title" className="text-[22px] font-bold">
-          {course} курс <span className="text-[17px] font-medium text-muted">· {o.summary.students} студентов</span>
+          {course} курс <span className="text-[17px] font-medium text-muted">· {studentsLabel(o.summary.students)}</span>
         </h2>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-6">
           <CohortSummaryCard summary={o.summary} title={`Сводка ${course} курса`} className="lg:self-start" />
