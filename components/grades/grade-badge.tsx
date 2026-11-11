@@ -5,6 +5,12 @@ import { cn } from "@/lib/utils";
 const SIZES = {
   sm: { box: "gap-1 rounded-lg px-2 py-0.5", letter: "text-[15px]", points: "text-xs" },
   md: { box: "gap-1.5 rounded-xl px-2.5 py-1", letter: "text-[20px]", points: "text-sm" },
+  /** Ячейка широкой таблицы: на ноутбуке (до xl) — буква над баллами, узкая; с xl — как sm */
+  cell: {
+    box: "gap-1 rounded-lg px-2 py-0.5 max-xl:flex-col max-xl:items-center max-xl:gap-0 max-xl:px-1.5 max-xl:py-1",
+    letter: "text-[15px] max-xl:text-[13px] max-xl:leading-none",
+    points: "text-xs max-xl:text-[11px] max-xl:leading-tight",
+  },
 } as const;
 
 /**
