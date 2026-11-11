@@ -1,5 +1,5 @@
 import type { MyDisciplineGrades } from "@/lib/data/grades";
-import { formatPoints, formatScored, scaleEntry, type GradeLetter } from "@/lib/grades/scale";
+import { GRADE_SCALE, formatPoints, formatScored, scaleEntry, type GradeLetter } from "@/lib/grades/scale";
 import { chartFloor, type CheckpointStat } from "@/lib/grades/stats";
 import { formatDayMonthLong } from "@/lib/schedule/dates";
 import { plural } from "@/lib/utils";
@@ -14,6 +14,12 @@ const THRESHOLDS: { points: number; letter: GradeLetter }[] = (["E", "C", "A"] a
   points: scaleEntry(l).min,
   letter: l,
 }));
+
+/** «<граница E> — E (ниже — FX), <граница C> — C, …» — подпись к пунктиру из шкалы: другая шкала — другая подпись. */
+const THRESHOLDS_CAPTION = THRESHOLDS.map((t, i) => {
+  const below = GRADE_SCALE[GRADE_SCALE.findIndex((e) => e.letter === t.letter) + 1];
+  return `${t.points} — ${t.letter}${i === 0 && below ? ` (ниже — ${below.letter})` : ""}`;
+}).join(", ");
 
 const MAX_NAME = 34;
 const shortName = (s: string) => (s.length > MAX_NAME ? `${s.slice(0, MAX_NAME - 1)}…` : s);
@@ -35,7 +41,7 @@ export function DisciplineAveragesChart({ disciplines }: { disciplines: MyDiscip
         <AveragesSvg disciplines={disciplines} row={60} bar={14} font={14} id="chart-avg-d" />
       </div>
       <figcaption className="mt-3 text-xs text-muted">
-        Пунктир — границы букв: 60 — E (ниже — FX), 75 — C, 90 — A. Средний считается по выставленным срезам.
+        Пунктир — границы букв: {THRESHOLDS_CAPTION}. Средний считается по выставленным срезам.
       </figcaption>
     </figure>
   );
@@ -111,7 +117,7 @@ function AveragesSvg({
 const TREND_H = 200;
 const PLOT_TOP = 26;
 const PLOT_BOTTOM = TREND_H - 46;
-/** Положение срезов по горизонтали (слева место под подписи 60/75/90). */
+/** Положение срезов по горизонтали (слева место под подписи границ букв). */
 const X = ["22%", "53%", "84%"] as const;
 
 /**

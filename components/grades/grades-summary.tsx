@@ -3,7 +3,7 @@ import { GradeLetterTile } from "@/components/grades/grade-badge";
 import { Card } from "@/components/ui/card";
 import type { MyDisciplineGrades, MyGrades } from "@/lib/data/grades";
 import { formatPoints, scaleEntry } from "@/lib/grades/scale";
-import { daysUntilLabel, pointsWord, worstFailingLetter } from "@/lib/grades/stats";
+import { daysUntilLabel, failingScaleText, pointsWord, worstFailingLetter } from "@/lib/grades/stats";
 import { CHECKPOINTS, FINAL_KIND_LABEL, checkpointLabel } from "@/lib/grades/term";
 import { formatDayMonthLong } from "@/lib/schedule/dates";
 import { cn, plural } from "@/lib/utils";
@@ -117,13 +117,12 @@ export function GradesSummary({
                 : `Есть оценки ниже порога в ${failing.length} ${plural(failing.length, ["дисциплине", "дисциплинах", "дисциплинах"])}`}
             </p>
             <p className="mt-0.5">
+              {failingScaleText(withF)}
               {viewer === "staff"
-                ? withF
-                  ? "FX (35–59 баллов) — можно пересдать, F (меньше 35) — нужно повторить курс."
-                  : "FX — меньше 60 баллов, можно пересдать."
+                ? "."
                 : withF
-                  ? "FX (35–59 баллов) — можно пересдать, F (меньше 35) — нужно повторить курс: спросите в деканате, как это сделать."
-                  : "FX — меньше 60 баллов, можно пересдать: спросите преподавателя семинаров, когда пересдача."}{" "}
+                  ? ": спросите в деканате, как это сделать."
+                  : ": спросите преподавателя семинаров, когда пересдача."}{" "}
               Долг по срезам закрывает сданный экзамен или зачёт.
             </p>
             <ul className="mt-1 flex flex-wrap gap-x-3">

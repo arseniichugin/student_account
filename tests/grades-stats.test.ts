@@ -1,17 +1,23 @@
 /**
  * Чистые функции экрана «Оценки» студента (lib/grades/stats.ts). База не нужна.
  */
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { scored } from "@/lib/grades/scale";
+import { GRADE_SCALE, scaleEntry, scored } from "@/lib/grades/scale";
 import {
+  FAILING_ADVICE,
+  PASS_POINTS,
   chartFloor,
   checkpointStats,
   daysUntilLabel,
   disciplineIssues,
+  failingScaleText,
   finalPassed,
   hasFailing,
   overallFromCheckpoints,
   pointsWord,
+  scaleRange,
   worstFailingLetter,
 } from "@/lib/grades/stats";
 
@@ -125,5 +131,41 @@ describe("Подписи", () => {
     expect(pointsWord(83)).toBe("балла");
     expect(pointsWord(85)).toBe("баллов");
     expect(pointsWord(87.4)).toBe("балла");
+  });
+});
+
+describe("Тексты о шкале — из GRADE_SCALE, а не руками", () => {
+  it("что делать с долгом — из расшифровки шкалы; пояснение к FX/F и порог сдачи", () => {
+    expect(FAILING_ADVICE).toEqual({ FX: "можно пересдать", F: "нужно повторить курс" });
+    for (const l of ["FX", "F"] as const) expect(scaleEntry(l).label).toContain(FAILING_ADVICE[l]);
+    expect(PASS_POINTS).toBe(60);
+    expect(scaleRange("FX")).toBe("35–59");
+    expect(failingScaleText(true)).toBe("FX (35–59 баллов) — можно пересдать, F (меньше 35) — нужно повторить курс");
+    expect(failingScaleText(false)).toBe("FX — меньше 60 баллов, можно пересдать");
+  });
+
+  it("в components/ и app/ нет зашитых границ шкалы в текстах", () => {
+    const bounds = new Set(GRADE_SCALE.flatMap((e) => [e.min, e.max]).filter((n) => n > 0 && n < 100));
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (/\.tsx?$/.test(e.name)) files.push(p);
+      }
+    };
+    walk(path.join(process.cwd(), "components"));
+    walk(path.join(process.cwd(), "app"));
+    // «35–59», «меньше 35», «60 — E», «ниже 60», «от 60 баллов»: число из шкалы рядом с буквой, словом «балл» или сравнением
+    const re = /(\d{2})\s*[–-]\s*(\d{2})|(?:меньше|ниже|выше|от|до|не ниже)\s+(\d{2})\b|(\d{2})\s+(?:—\s+[A-F]X?\b|балл)/g;
+    const found: string[] = [];
+    for (const f of files) {
+      const src = fs.readFileSync(f, "utf8");
+      for (const m of src.matchAll(re)) {
+        const nums = m.slice(1).filter(Boolean).map(Number);
+        if (nums.some((n) => bounds.has(n))) found.push(`${path.relative(process.cwd(), f)}: ${m[0]}`);
+      }
+    }
+    expect(found).toEqual([]);
   });
 });

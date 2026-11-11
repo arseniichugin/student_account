@@ -3,7 +3,7 @@
  * масштаб графика, подписи «через N дней» и «84,3 балла». Без серверного кода и без базы:
  * их читают страница /grades, блок на «Сегодня» и слой данных (getMyGradesDigest).
  */
-import { averagePoints, overallAverage, scaleEntry, scored, type GradeLetter, type ScoredGrade } from "@/lib/grades/scale";
+import { GRADE_SCALE, averagePoints, overallAverage, scaleEntry, scored, type GradeLetter, type ScoredGrade } from "@/lib/grades/scale";
 import { CHECKPOINTS, type CheckpointNo } from "@/lib/grades/term";
 import { daysBetweenIso } from "@/lib/moscow-time";
 import { plural } from "@/lib/utils";
@@ -60,8 +60,32 @@ export function worstFailingLetter(d: DisciplineLike): "FX" | "F" | null {
   return letters.includes("FX") ? "FX" : null;
 }
 
-/** Что означает долг (как в шкале): FX — «можно пересдать», F — «нужно повторить курс». */
-export const FAILING_ADVICE = { FX: "можно пересдать", F: "нужно повторить курс" } as const;
+/** «неудовлетворительно, можно пересдать» → «можно пересдать»: что делать с долгом — вторая часть расшифровки шкалы. */
+const adviceOf = (letter: "FX" | "F"): string => {
+  const label = scaleEntry(letter).label;
+  const i = label.indexOf(", ");
+  return i >= 0 ? label.slice(i + 2) : label;
+};
+
+/** Что означает долг — из расшифровки шкалы (lib/grades/scale.ts): FX — «можно пересдать», F — «нужно повторить курс». */
+export const FAILING_ADVICE: Readonly<Record<"FX" | "F", string>> = { FX: adviceOf("FX"), F: adviceOf("F") };
+
+/** «35–59» — баллы буквы по шкале. */
+export const scaleRange = (letter: GradeLetter): string => `${scaleEntry(letter).min}–${scaleEntry(letter).max}`;
+
+/** Порог «сдано»: нижняя граница самой низкой положительной буквы (E — 60). */
+export const PASS_POINTS = Math.min(...GRADE_SCALE.filter((e) => !e.failing).map((e) => e.min));
+
+/**
+ * Пояснение к долгам в сводке «Оценок» — из шкалы: «FX (35–59 баллов) — можно пересдать, F (меньше 35) — нужно
+ * повторить курс» или, если F нет, «FX — меньше 60 баллов, можно пересдать». Без точки на конце.
+ */
+export function failingScaleText(withF: boolean): string {
+  const fx = scaleEntry("FX");
+  return withF
+    ? `FX (${scaleRange("FX")} ${plural(fx.max, ["балл", "балла", "баллов"])}) — ${FAILING_ADVICE.FX}, F (меньше ${fx.min}) — ${FAILING_ADVICE.F}`
+    : `FX — меньше ${PASS_POINTS} ${plural(PASS_POINTS, ["балла", "баллов", "баллов"])}, ${FAILING_ADVICE.FX}`;
+}
 
 export type CheckpointStat = {
   no: CheckpointNo;

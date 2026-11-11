@@ -26,7 +26,7 @@ export function ErrorScreen({ error, retry }: { error: unknown; retry: () => voi
         <h1 className="mt-4 text-[22px] font-bold">Сервис временно недоступен</h1>
         <p className="mt-2 text-[15px] text-muted">
           Не удалось загрузить страницу: сервер не получил данные. Обычно это проходит за минуту — попробуйте ещё раз.
-          Если ошибка повторяется — сообщите в деканат.
+          Если не помогло — зайдите чуть позже.
         </p>
         {digest && <p className="mt-2 text-xs text-muted">Код ошибки: {digest}</p>}
       </div>

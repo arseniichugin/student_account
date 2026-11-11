@@ -1,5 +1,6 @@
 import { ChevronDown, Info } from "lucide-react";
 import { GRADE_SCALE } from "@/lib/grades/scale";
+import { FAILING_ADVICE } from "@/lib/grades/stats";
 import { CHECKPOINTS } from "@/lib/grades/term";
 import { formatDayMonthLong } from "@/lib/schedule/dates";
 import { cn } from "@/lib/utils";
@@ -64,7 +65,9 @@ export function GradingInfo({ className }: { className?: string }) {
               делятся на их число, без весов. Дисциплины без оценок не учитываются.
             </li>
             <li>Экзамен и зачёт в средние не входят — их оценка показана в карточке дисциплины отдельно.</li>
-            <li>FX — можно пересдать; F — дисциплину нужно изучить заново.</li>
+            <li>
+              FX — {FAILING_ADVICE.FX}; F — {FAILING_ADVICE.F}.
+            </li>
           </ul>
         </div>
       </div>

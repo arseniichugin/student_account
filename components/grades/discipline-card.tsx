@@ -202,10 +202,13 @@ function issueText(d: MyDisciplineGrades, issues: DisciplineIssues, viewer: "stu
     );
   }
   const text = parts.join("; ");
+  const withF =
+    issues.checkpoints.some((no) => d.checkpoints[no - 1]!.letter === "F") ||
+    (issues.final && f?.kind === "EXAM" && f.letter === "F");
   const ask =
     viewer === "staff"
       ? ""
-      : /повторить курс/.test(text)
+      : withF
         ? " Спросите в деканате, как это сделать."
         : " Спросите преподавателя семинаров, когда пересдача.";
   const closes = d.final ? ` Долг по срезам закроет сданный ${d.final.kind === "CREDIT" ? "зачёт" : "экзамен"}.` : "";
