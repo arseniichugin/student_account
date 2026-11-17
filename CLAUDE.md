@@ -103,7 +103,8 @@ app/(auth)/login/        вход
 app/(app)/               кабинет: layout (requireUser) рисует оболочку и меню по роли; error.tsx — «Повторить»
 app/(app)/(student)/     страницы студента: today, grades, requests, profile (layout + КАЖДАЯ страница — requireStudent)
 app/(app)/(staff)/staff/ кабинет сотрудника деканата (requireStaff); marks/ — ввод оценок; notifications/ — события и уведомления
-app/(app)/(teacher)/teacher/ кабинет преподавателя (requireTeacher): marks/ — оценки своим группам, notifications/ — рассылка своим группам
+app/(app)/(teacher)/teacher/ кабинет преподавателя (requireTeacher): marks/ — журнал (студенты × занятия: оценки
+                         и посещаемость, работает без JS), notifications/ — рассылка своим группам
 app/(app)/notifications/ входящие уведомления — студент и преподаватель (requireRecipient)
 app/(app)/schedule/      расписание группы/преподавателя — обе роли (requireUser)
 app/(app)/map/           карта кампуса — обе роли (requireUser)
@@ -124,6 +125,8 @@ lib/data/                ЕДИНСТВЕННОЕ место запросов к
 lib/data/schedule.ts     расписание: личное (StudentContext), группы/преподавателя и поиск (UserContext)
 lib/data/marks.ts        оценки на занятиях: обзор студента (StudentContext), ввод — Grader (StaffContext | TeacherContext)
 lib/data/teacher.ts      профиль преподавателя (TeacherContext)
+lib/data/journal.ts      журнал преподавателя: пары «группа + предмет», таблица, посещаемость (TeacherContext)
+lib/journal/actions.ts   действия журнала (обычные формы + redirect обратно; ошибки — кодом ?msg=)
 lib/marks/form-actions.ts, lib/notifications/form-actions.ts  серверные действия форм оценок и событий (обе роли)
 lib/data/notifications.ts  события деканата и преподавателя, входящие уведомления (RecipientContext, только createdAt ≤ now)
 lib/notifications/labels.ts  подписи видов событий и аудиторий (годится клиенту)

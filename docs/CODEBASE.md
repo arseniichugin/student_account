@@ -170,7 +170,7 @@ db.request.findFirst({ where: { id, studentId: ctx.studentId } })
 | `/staff` | `app/(app)/(staff)/staff/` | `requireStaff` | requests, profile | PRD §5.7 |
 | `/staff/marks` | `app/(app)/(staff)/staff/marks/` | `requireStaff` | marks | MARKS.md |
 | `/staff/notifications` | `app/(app)/(staff)/staff/notifications/` | `requireStaff` | notifications | NOTIFICATIONS.md |
-| `/teacher/marks` | `app/(app)/(teacher)/teacher/marks/` | `requireTeacher` | marks, teacher | TEACHERS.md |
+| `/teacher/marks` | `app/(app)/(teacher)/teacher/marks/` — журнал (студенты × занятия, оценки и посещаемость; без клиентского JS) | `requireTeacher` | journal, marks, teacher | TEACHERS.md |
 | `/teacher/notifications` | `app/(app)/(teacher)/teacher/notifications/` | `requireTeacher` | notifications, teacher | TEACHERS.md |
 | `/notifications` | `app/(app)/notifications/` | `requireRecipient` | notifications | NOTIFICATIONS.md |
 | `/schedule` | `app/(app)/schedule/` | `requireUser` (+ роль для «моего») | schedule, schedule-moves | DESIGN §6 |
@@ -190,6 +190,7 @@ Layout-ы групп `(student)`, `(staff)`, `(teacher)` — дополните�
 | `app/(app)/notifications/actions.ts` | `markNotificationsReadAction` | `requireRecipient` |
 | `lib/marks/form-actions.ts` | `createMarkAction`, `deleteMarkAction` | деканат **или** преподаватель |
 | `lib/notifications/form-actions.ts` | создать/удалить событие деканата и преподавателя | `requireStaff` / `requireTeacher` |
+| `lib/journal/actions.ts` | `addJournalMarkAction`, `removeJournalMarkAction`, `setJournalAttendanceAction` — обычные формы, `redirect` обратно, ошибка кодом `?msg=` | `requireTeacher` |
 
 ### API
 
@@ -217,11 +218,12 @@ Layout-ы групп `(student)`, `(staff)`, `(teacher)` — дополните�
 | `notifications.ts` | `createFacultyAnnouncement`, `createTeacherAnnouncement`, `list…Announcements`, `delete…Announcement`, `suggest…`, счётчики аудитории · `listMyNotifications`, `countMyUnreadNotifications`, `markMyNotificationsRead` | Staff · Teacher · Recipient |
 | `profile.ts` | `getMyStudentProfile`, `getMyStaffProfile` | Student · Staff |
 | `teacher.ts` | `getMyTeacherProfile` | Teacher |
+| `journal.ts` | `listTeacherClasses`, `getTeacherJournal`, `setTeacherAttendance` | Teacher |
 | `account.ts` | `getPasswordChangeLock`, `changeMyPassword` | userId из сессии |
 
 Ограничения частоты (защита от спама) живут рядом с функциями записи:
 `MAX_ACTIVE_REQUESTS`, `MAX_REQUESTS_PER_HOUR` (заявки), `MAX_MARKS_PER_HOUR[_DEMO]` (оценки),
-`MAX_ANNOUNCEMENTS_PER_HOUR[_DEMO]`, `MAX_SCHEDULE_AHEAD_DAYS` (события). Лимиты входа — `lib/auth/rate-limit.ts`.
+`MAX_ANNOUNCEMENTS_PER_HOUR[_DEMO]`, `MAX_SCHEDULE_AHEAD_DAYS` (события), `MAX_ATTENDANCE_PER_HOUR[_DEMO]` (посещаемость). Лимиты входа — `lib/auth/rate-limit.ts`.
 
 Функции записи возвращают результат-объединение, а не бросают исключения:
 `{ ok: true, id } | { ok: false, reason: "too-many-recent" | … }` — действие превращает `reason` в текст для формы.
@@ -245,6 +247,7 @@ Layout-ы групп `(student)`, `(staff)`, `(teacher)` — дополните�
       │                   LessonGroup ── Lesson (date, startTime, status) ── Discipline, Teacher, Room ── Building
       │                                     │
       ├── Mark (value 1–5, lessonOid, createdById → Staff | teacherId → Teacher)
+      ├── Attendance (PRESENT | LATE | ABSENT, одна на студента и занятие, lessonOid, teacherId)
       ├── Grade (итог ведомости: EXAM | CREDIT | COURSEWORK | MIDTERM)
       └── Request (typeId → RequestType, status, payload JSON)
 
@@ -338,7 +341,7 @@ npm run lint && npm run typecheck && npm test
 
 - Тесты (`tests/*.test.ts`, Vitest) работают с **настоящей базой** — сначала `npm run db:setup`.
   Файлы идут последовательно (`fileParallelism: false`). `server-only` подменён заглушкой (`tests/stubs/`).
-- Главные: `security.test.ts` (чужие данные, хеши, лимиты входа), `teachers.test.ts`, `marks.test.ts`,
+- Главные: `security.test.ts` (чужие данные, хеши, лимиты входа), `teachers.test.ts`, `journal.test.ts`, `marks.test.ts`,
   `notifications.test.ts`, `university-*.test.ts` (импорт на `tests/fixtures/`, в т. ч. сломанные файлы), `schedule*.test.ts`.
 - Интерфейс — Playwright (уже установлен в облачном окружении): 360 px, вход под тестовым аккаунтом,
   скриншоты — в `docs/screenshots/` по правилам из README папки.

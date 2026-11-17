@@ -150,6 +150,7 @@ model Student {
   languageGroups  StudentGroup[]
   grades          Grade[]
   marks           Mark[]
+  attendance      Attendance[]
   /// Когда студент последний раз открывал «Оценки»: оценки, выставленные позже, — «новые» (кружок в меню)
   marksSeenAt     DateTime       @default(now())
   requests        Request[]
@@ -204,6 +205,8 @@ model Teacher {
   marks         Mark[]
   /// События, адресованные лично этому преподавателю
   announcements Announcement[]
+  /// Отметки посещаемости, которые поставил преподаватель
+  attendance    Attendance[]
 }
 
 /// Корпус. Страница карты читает campus-map.json напрямую (lib/campus-map/load.ts), а не эту таблицу;
@@ -305,6 +308,7 @@ model Lesson {
   status         LessonStatus  @default(NORMAL)
   groups         LessonGroup[]
   marks          Mark[]
+  attendance     Attendance[]
 
   @@index([date])
   @@index([teacherId, date])
@@ -393,6 +397,38 @@ model Mark {
   @@index([lessonOid])
   @@index([createdById, createdAt])
   @@index([teacherId, createdAt])
+}
+
+enum AttendanceStatus {
+  /// Был на занятии
+  PRESENT
+  /// Опоздал
+  LATE
+  /// Не был
+  ABSENT
+}
+
+/// Посещаемость: одна отметка на студента и занятие (журнал преподавателя, /teacher/marks).
+/// Как и у оценок, связь с занятием переживает повторный импорт расписания: lessonId обнуляется
+/// (SetNull) и восстанавливается по lessonOid, дата хранится в самой отметке.
+model Attendance {
+  id        String           @id @default(cuid())
+  studentId String
+  student   Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  lessonId  String?
+  lesson    Lesson?          @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+  lessonOid String
+  /// Дата занятия по Москве (копия — для выборок и подписи)
+  date      DateTime         @db.Date
+  status    AttendanceStatus
+  /// Кто отметил; null — демо-наполнение
+  teacherId String?
+  teacher   Teacher?         @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  updatedAt DateTime         @updatedAt
+
+  @@unique([studentId, lessonOid])
+  @@index([lessonId])
+  @@index([lessonOid])
 }
 
 // ─── Заявки и справки ───────────────────────────────────────────────

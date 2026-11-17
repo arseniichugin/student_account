@@ -186,7 +186,7 @@ async function studentScope(ctx: Grader): Promise<Prisma.StudentWhereInput> {
 }
 
 /** Доступный студент и его группы; чужой или несуществующий — null. */
-async function gradableStudent(ctx: Grader, studentId: string) {
+export async function gradableStudent(ctx: Grader, studentId: string) {
   const s = await db.student.findFirst({
     where: { id: studentId, ...(await studentScope(ctx)) },
     select: {
@@ -207,7 +207,7 @@ async function gradableStudent(ctx: Grader, studentId: string) {
  * в прошлые дни или сегодня не позже текущего времени по Москве («HH:MM» сравнивается как строка).
  * Преподавателю — только его собственные занятия.
  */
-function gradableLessonsWhere(ctx: Grader, groupIds: string[], today: string, nowTime: string = moscowNowTime()) {
+export function gradableLessonsWhere(ctx: Grader, groupIds: string[], today: string, nowTime: string = moscowNowTime()) {
   return {
     status: { not: "CANCELLED" as const },
     groups: { some: { groupId: { in: groupIds } } },

@@ -92,6 +92,8 @@ Grade           id, studentId, disciplineId, semester, kind (EXAM | CREDIT | COU
 Mark            id, studentId, lessonId? (SetNull), lessonOid, disciplineId, date, startTime, lessonKind,
                 value (1–5), createdById? → Staff, teacherId? → Teacher, createdAt — оценка на занятии, их 0…N на занятие
                 (подробно — docs/MARKS.md); импорт восстанавливает lessonId по lessonOid
+Attendance      id, studentId, lessonId? (SetNull) + lessonOid, date, status (PRESENT | LATE | ABSENT), teacherId?,
+                updatedAt; уникально (studentId, lessonOid) — посещаемость, журнал преподавателя (docs/TEACHERS.md)
 Deadline        id, groupId, disciplineId?, title, dueAt
 RequestType     id, code, name, description, etaDays
 Request         id, studentId, typeId, payload (JSON),
