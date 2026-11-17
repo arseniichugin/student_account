@@ -19,6 +19,7 @@ import {
   readCredentials,
   recoverCredentialsTemp,
 } from "@/lib/university-data/credentials";
+import { pickTestTeachers } from "@/lib/university-data/import";
 import { loadUniversityData } from "@/lib/university-data/load";
 import { translit } from "@/lib/university-data/translit";
 import {
@@ -26,6 +27,7 @@ import {
   pickTestStudents,
   staffLoginForFaculty,
   validateUniversityData,
+  type UniversityDataset,
   type UniversityFiles,
 } from "@/lib/university-data/validate";
 
@@ -235,6 +237,24 @@ describe("Аккаунты", () => {
     if (!r.ok) throw new Error("fixture");
     const picked = pickTestStudents(r.data);
     expect(picked.map((s) => s.login)).toEqual(["maria.ivanova", "yan.sidorov", "oleg.petrov"]);
+  });
+
+  it("тестовые преподаватели: по одному на тестового студента, ведут его группу, без повторов", () => {
+    const lesson = (teacherOid: string | null, groups: string[]) => ({ teacherOid, groups }) as UniversityDataset["lessons"][number];
+    const data = {
+      lessons: [
+        lesson("t-big", ["A", "B", "C", "D"]), // ведёт A и B — достанется первому студенту, второму — следующий
+        lesson("t-b2", ["B", "X"]),
+        lesson("t-b1", ["B", "Y"]), // столько же групп, что у t-b2: выигрывает меньший oid
+        lesson("t-c", ["C"]),
+        lesson(null, ["Z"]),
+      ],
+    };
+    const students = [{ academicGroup: "A" }, { academicGroup: "B" }, { academicGroup: "Z" }];
+    expect(pickTestTeachers(data, students)).toEqual([
+      { oid: "t-big", groups: ["A", "B"] },
+      { oid: "t-b1", groups: ["B"] },
+    ]);
   });
 
   it("случайный пароль: 12 символов без похожих знаков", () => {

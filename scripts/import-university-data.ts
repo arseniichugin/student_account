@@ -7,13 +7,15 @@
  *   npm run data:import -- --credentials файл   — куда записать логины и пароли (или env CREDENTIALS_FILE)
  *
  * Переменные окружения: DATABASE_URL, DEMO_PASSWORD (пароль тестовых аккаунтов и деканатов,
- * по умолчанию Hogwarts2026), TEST_STUDENT_LOGINS (логины тестовых студентов через запятую).
+ * по умолчанию Hogwarts2026), TEST_STUDENT_LOGINS (логины тестовых студентов через запятую),
+ * TEST_TEACHER_LOGINS (логины тестовых преподавателей через запятую; по умолчанию — по одному
+ * на тестового студента из тех, кто ведёт занятия у его группы).
  * Формат файлов и что делает импорт — data/university/README.md.
  */
 import "dotenv/config";
 import path from "node:path";
 import { createPrismaClient } from "@/lib/prisma-client";
-import { DEFAULT_DEMO_PASSWORD, ImportError, importUniversityData, testLoginsFromEnv } from "@/lib/university-data/import";
+import { DEFAULT_DEMO_PASSWORD, ImportError, importUniversityData, testLoginsFromEnv, testTeacherLoginsFromEnv } from "@/lib/university-data/import";
 import { loadUniversityData, universityDataDir } from "@/lib/university-data/load";
 import { formatIssue } from "@/lib/university-data/validate";
 import { plural } from "@/lib/utils";
@@ -73,6 +75,7 @@ async function main(): Promise<number> {
     const summary = await importUniversityData(db, d, {
       demoPassword: process.env.DEMO_PASSWORD || DEFAULT_DEMO_PASSWORD,
       testLogins: testLoginsFromEnv(),
+      testTeacherLogins: testTeacherLoginsFromEnv(),
       credentialsPath,
       log: (m) => console.log(`  ${m}`),
     });
@@ -99,8 +102,9 @@ async function main(): Promise<number> {
       console.log(`  студент  ${s.login.padEnd(30)} ${s.fullName}, ${s.faculty}, ${s.course} курс, ${s.group}`);
     }
     for (const s of summary.staff) console.log(`  деканат  ${s.login.padEnd(30)} ${s.fullName}, ${s.faculty}`);
-    if (summary.testTeacher) {
-      console.log(`  препод.  ${summary.testTeacher.login.padEnd(30)} ${summary.testTeacher.fullName}`);
+    for (const t of summary.testTeachers) {
+      const groups = t.groups.length ? ` (ведёт ${t.groups.join(", ")})` : "";
+      console.log(`  препод.  ${t.login.padEnd(30)} ${t.fullName}${groups}`);
     }
     console.log(process.env.DEMO_PASSWORD ? "  Пароль: из DEMO_PASSWORD" : `  Пароль: ${DEFAULT_DEMO_PASSWORD}`);
 

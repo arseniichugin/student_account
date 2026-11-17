@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { runAction } from "@/lib/actions/errors";
 import { requireStaff, requireTeacher } from "@/lib/auth/guards";
 import {
   STAFF_AUDIENCES,
@@ -69,18 +70,32 @@ export async function createStaffAnnouncementAction(_prev: AnnouncementFormState
   const ctx = await requireStaff();
   const parsed = parseForm(formData, STAFF_AUDIENCES);
   if (!parsed.ok) return parsed.state;
-  const state = toState(await createFacultyAnnouncement(ctx, parsed.input));
-  revalidatePath("/staff/notifications");
-  return state;
+  const input = parsed.input;
+  return runAction(
+    "createStaffAnnouncement",
+    async () => {
+      const state = toState(await createFacultyAnnouncement(ctx, input));
+      revalidatePath("/staff/notifications");
+      return state;
+    },
+    (error) => ({ error }),
+  );
 }
 
 export async function createTeacherAnnouncementAction(_prev: AnnouncementFormState, formData: FormData): Promise<AnnouncementFormState> {
   const ctx = await requireTeacher();
   const parsed = parseForm(formData, TEACHER_AUDIENCES);
   if (!parsed.ok) return parsed.state;
-  const state = toState(await createTeacherAnnouncement(ctx, parsed.input));
-  revalidatePath("/teacher/notifications");
-  return state;
+  const input = parsed.input;
+  return runAction(
+    "createTeacherAnnouncement",
+    async () => {
+      const state = toState(await createTeacherAnnouncement(ctx, input));
+      revalidatePath("/teacher/notifications");
+      return state;
+    },
+    (error) => ({ error }),
+  );
 }
 
 const NOT_FOUND = "Событие не найдено — возможно, его уже удалили. Обновите страницу.";
@@ -89,16 +104,30 @@ export async function deleteStaffAnnouncementAction(formData: FormData): Promise
   const ctx = await requireStaff();
   const parsed = deleteAnnouncementSchema.safeParse({ announcementId: formData.get("announcementId") });
   if (!parsed.success) return { error: NOT_FOUND };
-  const deleted = await deleteFacultyAnnouncement(ctx, parsed.data.announcementId);
-  revalidatePath("/staff/notifications");
-  return deleted ? {} : { error: NOT_FOUND };
+  const id = parsed.data.announcementId;
+  return runAction(
+    "deleteStaffAnnouncement",
+    async () => {
+      const deleted = await deleteFacultyAnnouncement(ctx, id);
+      revalidatePath("/staff/notifications");
+      return deleted ? {} : { error: NOT_FOUND };
+    },
+    (error) => ({ error }),
+  );
 }
 
 export async function deleteTeacherAnnouncementAction(formData: FormData): Promise<{ error?: string }> {
   const ctx = await requireTeacher();
   const parsed = deleteAnnouncementSchema.safeParse({ announcementId: formData.get("announcementId") });
   if (!parsed.success) return { error: NOT_FOUND };
-  const deleted = await deleteTeacherAnnouncement(ctx, parsed.data.announcementId);
-  revalidatePath("/teacher/notifications");
-  return deleted ? {} : { error: NOT_FOUND };
+  const id = parsed.data.announcementId;
+  return runAction(
+    "deleteTeacherAnnouncement",
+    async () => {
+      const deleted = await deleteTeacherAnnouncement(ctx, id);
+      revalidatePath("/teacher/notifications");
+      return deleted ? {} : { error: NOT_FOUND };
+    },
+    (error) => ({ error }),
+  );
 }

@@ -85,8 +85,17 @@ describe("Аккаунты и распределение групп", () => {
     expect(await db.user.count({ where: { role: "TEACHER", teacher: null } })).toBe(0);
   });
 
-  it("общий демо-пароль — только у одного тестового преподавателя", async () => {
-    expect(await db.user.count({ where: { role: "TEACHER", isDemo: true } })).toBe(1);
+  it("общий демо-пароль — только у тестовых преподавателей, по одному на тестового студента", async () => {
+    const testStudents = await db.student.findMany({ where: { user: { isDemo: true } }, select: { id: true, academicGroupId: true } });
+    expect(testStudents.length).toBeGreaterThan(0);
+    const testTeachers = await db.teacher.findMany({ where: { user: { isDemo: true } }, select: { id: true } });
+    if (!process.env.TEST_TEACHER_LOGINS) expect(testTeachers.length).toBe(testStudents.length);
+    expect(await db.user.count({ where: { role: "TEACHER", isDemo: true } })).toBe(testTeachers.length);
+    // Каждый тестовый студент учится в группе хотя бы одного тестового преподавателя
+    const groups = new Set(
+      (await Promise.all(testTeachers.map((t) => teacherGroupIds(t.id)))).flat(),
+    );
+    for (const s of testStudents) expect(groups.has(s.academicGroupId)).toBe(true);
   });
 
   it("у пары (группа, предмет) один преподаватель; исключение — лекция потока у другого лектора", async () => {

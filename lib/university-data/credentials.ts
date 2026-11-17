@@ -27,8 +27,9 @@ export const ROLE_STAFF = "Деканат";
 export const ROLE_TEST_STUDENT = "Студент (тестовый)";
 export const ROLE_STUDENT = "Студент";
 export const ROLE_TEACHER = "Преподаватель";
+export const ROLE_TEST_TEACHER = "Преподаватель (тестовый)";
 
-const ROLE_ORDER = [ROLE_STAFF, ROLE_TEACHER, ROLE_TEST_STUDENT, ROLE_STUDENT];
+const ROLE_ORDER = [ROLE_STAFF, ROLE_TEST_TEACHER, ROLE_TEACHER, ROLE_TEST_STUDENT, ROLE_STUDENT];
 
 /** Читает прежний credentials.csv, чтобы повторный импорт не потерял выданные ранее пароли. */
 export function readCredentials(path: string): Map<string, CredentialRow> {

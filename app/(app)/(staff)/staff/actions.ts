@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { runAction } from "@/lib/actions/errors";
 import { requireStaff } from "@/lib/auth/guards";
 import { updateFacultyRequestStatus } from "@/lib/data/requests";
 import { updateRequestStatusSchema } from "@/lib/validation/requests";
@@ -17,10 +18,16 @@ export async function updateStatusAction(_prev: StatusFormState, formData: FormD
   });
   if (!parsed.success) return { error: "Проверьте статус и комментарий" };
 
-  const updated = await updateFacultyRequestStatus(ctx, parsed.data);
-  // Заявка другого факультета → та же реакция, что и на несуществующую.
-  if (!updated) return { error: "Заявка не найдена" };
-
-  revalidatePath("/staff");
-  return { success: "Статус обновлён, студент получит уведомление" };
+  return runAction(
+    "updateRequestStatus",
+    async () => {
+      const updated = await updateFacultyRequestStatus(ctx, parsed.data);
+      // Заявка другого факультета → та же реакция, что и на несуществующую.
+      if (!updated) return { error: "Заявка не найдена" };
+      revalidatePath("/staff");
+      revalidatePath("/requests");
+      return { success: "Статус обновлён, студент получит уведомление" };
+    },
+    (error) => ({ error }),
+  );
 }

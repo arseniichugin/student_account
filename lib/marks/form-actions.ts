@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { runAction } from "@/lib/actions/errors";
 import { getStaffContext, getTeacherContext } from "@/lib/auth/guards";
 import { createMark, deleteMark, type Grader } from "@/lib/data/marks";
 import { formatDayMonthLong } from "@/lib/schedule/dates";
@@ -36,20 +37,34 @@ export async function createMarkAction(_prev: MarkFormState, formData: FormData)
     return { error: "Выберите оценку от 1 до 5" };
   }
 
-  const result = await createMark(ctx, parsed.data);
-  if (!result.ok) return { error: result.error };
-
-  revalidateMarkPages();
-  return {
-    success: `Оценка «${result.value}» выставлена: ${result.student}, ${result.discipline}, ${formatDayMonthLong(result.date)} (${result.start})`,
-    savedAt: Date.now(),
-  };
+  const input = parsed.data;
+  return runAction(
+    "createMark",
+    async () => {
+      const result = await createMark(ctx, input);
+      if (!result.ok) return { error: result.error };
+      revalidateMarkPages();
+      return {
+        success: `Оценка «${result.value}» выставлена: ${result.student}, ${result.discipline}, ${formatDayMonthLong(result.date)} (${result.start})`,
+        savedAt: Date.now(),
+      };
+    },
+    (error) => ({ error }),
+  );
 }
 
-export async function deleteMarkAction(formData: FormData): Promise<void> {
+export async function deleteMarkAction(formData: FormData): Promise<{ error?: string }> {
   const ctx = await requireGrader();
   const parsed = deleteMarkSchema.safeParse({ markId: formData.get("markId") });
-  if (!parsed.success) return;
-  await deleteMark(ctx, parsed.data.markId);
-  revalidateMarkPages();
+  if (!parsed.success) return { error: "Оценка не найдена" };
+  const id = parsed.data.markId;
+  return runAction(
+    "deleteMark",
+    async () => {
+      const deleted = await deleteMark(ctx, id);
+      revalidateMarkPages();
+      return deleted ? {} : { error: "Оценка не найдена — возможно, её уже удалили. Обновите страницу." };
+    },
+    (error) => ({ error }),
+  );
 }

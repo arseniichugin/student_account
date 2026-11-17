@@ -35,6 +35,8 @@ export function StatusForm({
 
   return (
     <form
+      // action — запасной путь без JavaScript (обычная отправка формы); с JS отправку ведёт onSubmit
+      action={formAction}
       className="mt-3 border-t border-border pt-3 @3xl:mt-0 @3xl:border-0 @3xl:pt-0"
       onSubmit={(e) => {
         e.preventDefault();
