@@ -111,6 +111,10 @@ app/api/marks/suggest/   подсказки ввода оценок (декан�
 app/api/staff/notifications/teachers/ подсказки «Преподавателю…» (getStaffContext → 401; ведущие у факультета, ≤ 5)
 app/api/teacher/groups/  подсказки групп преподавателя (getTeacherContext → 401; только его группы, ≤ 5)
 app/api/staff/notifications/groups/ подсказки групп для событий (getStaffContext → 401; свой факультет, ≤ 5)
+app/api/health/          состояние: база и миграции (без входа — только ok; подробности — деканату)
+instrumentation.ts       проверка базы и миграций при запуске сервера (громкое предупреждение в лог)
+lib/health.ts            checkHealth: доступна ли база, какие миграции этой версии не применены
+lib/actions/errors.ts    runAction — ошибки серверных действий в лог (без данных людей) и понятным текстом в форму
 lib/navigation.ts        меню для каждой роли — ЕДИНСТВЕННОЕ место, где перечислены разделы
 lib/auth/                сессии, пароли, ограничение попыток, guards, серверные действия входа
 lib/data/                ЕДИНСТВЕННОЕ место запросов к базе из страниц; всё фильтруется по контексту
@@ -160,11 +164,14 @@ tests/                   автотесты безопасности, импор
 | `npm run db:seed` | Пересоздать демо-контент (заявки, оценки ведомостей и оценки на занятиях, объявления, уведомления, дедлайны) поверх импорта |
 | `npm run lint` · `npm run typecheck` · `npm test` | Проверки — запускать перед каждым коммитом |
 | `npm run build` | Продакшен-сборка |
+| `docker compose build` → `run --rm migrate` → `up -d app` | Обновление на сервере (порядок важен, см. `docs/DEPLOYMENT.md` §6) |
 
 Тестовые аккаунты (основной набор данных), пароль `Hogwarts2026` (`DEMO_PASSWORD`):
 студенты `larisa.sharova26` (Гриффиндор, 1 курс), `eva.orlova25` (Слизерин, 2 курс, есть долг),
 `yaroslav.shestakov24` (Когтевран, 3 курс); деканаты `dekanat.gr`, `dekanat.sl`, `dekanat.kg`, `dekanat.pf`;
-преподаватель `v.chernykh` (верховая езда, ведёт группу `larisa.sharova26`); остальные преподаватели — с паролями из `credentials.csv`.
+преподаватели (по одному на тестового студента, `TEST_TEACHER_LOGINS`) `v.chernykh` (верховая езда, группы
+`larisa.sharova26` и `eva.orlova25`), `g.suvorova` (история магии, группа `eva.orlova25`), `s.romanov`
+(зельеварение, группа `yaroslav.shestakov24`); остальные преподаватели — с паролями из `credentials.csv`.
 Пароли остальных студентов — в `credentials.csv` (создаёт импорт).
 
 ## Проверка в браузере

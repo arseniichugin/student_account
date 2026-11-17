@@ -1,4 +1,15 @@
+import { readdirSync } from "node:fs";
 import type { NextConfig } from "next";
+
+// Миграции, с которыми собрана эта версия: /api/health и проверка при запуске сравнивают их
+// с применёнными в базе (иначе новая версия молча падает на запросах к новым колонкам).
+function migrationNames(): string {
+  try {
+    return readdirSync("prisma/migrations").filter((d) => /^\d{14}_/.test(d)).sort().join(",");
+  } catch {
+    return "";
+  }
+}
 
 // Content-Security-Policy — только в продакшене: в режиме разработки React и Next.js
 // используют eval (стек ошибок сервера в браузере), строгая политика сломала бы dev.
@@ -25,6 +36,12 @@ const isProduction = process.env.NODE_ENV === "production";
 const nextConfig: NextConfig = {
   // Для Docker собираем автономный сервер (см. Dockerfile).
   output: process.env.BUILD_STANDALONE === "1" ? "standalone" : undefined,
+  // Версия сборки. Если вкладка браузера открыта со старой версии, Next.js видит расхождение
+  // и перезагружает страницу целиком, а не шлёт серверные действия со старыми id
+  // (иначе после обновления сервера кнопки «Сохранить» молча не работают до ручной перезагрузки).
+  // Задаётся при сборке: Dockerfile и .devcontainer/start.sh. Без переменной — поведение по умолчанию.
+  deploymentId: process.env.DEPLOYMENT_VERSION || undefined,
+  env: { EXPECTED_MIGRATIONS: migrationNames(), BUILD_VERSION: process.env.DEPLOYMENT_VERSION || "" },
   poweredByHeader: false,
   // Дополнительные адреса, с которых можно отправлять формы (серверные действия).
   // Нужно только за чужим прокси, который подменяет адрес (GitHub Codespaces —

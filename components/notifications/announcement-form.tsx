@@ -78,6 +78,8 @@ export function AnnouncementForm({
 
   return (
     <form
+      // action — запасной путь без JavaScript (обычная отправка формы); с JS отправку ведёт onSubmit
+      action={formAction}
       ref={formRef}
       className="space-y-5"
       noValidate

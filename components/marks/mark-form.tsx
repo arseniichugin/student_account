@@ -27,6 +27,8 @@ export function MarkForm({ emptyStudentText }: { emptyStudentText: string }) {
 
   return (
     <form
+      // action — запасной путь без JavaScript (обычная отправка формы); с JS отправку ведёт onSubmit
+      action={formAction}
       className="space-y-3"
       onSubmit={(e) => {
         e.preventDefault();

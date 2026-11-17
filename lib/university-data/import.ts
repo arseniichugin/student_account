@@ -19,6 +19,7 @@ import {
   ROLE_STUDENT,
   ROLE_TEACHER,
   ROLE_TEST_STUDENT,
+  ROLE_TEST_TEACHER,
   commitCredentials,
   discardCredentials,
   generatePassword,
@@ -61,11 +62,13 @@ const STAFF_POSITION = "Специалист по учебной работе";
 
 export class ImportError extends Error {}
 
-/**
- * Тестовый преподаватель для жюри: ведёт занятия у академической группы первого тестового студента
- * (чтобы было видно всю цепочку «оценка → студент»); среди таких — с наибольшим числом групп.
- */
-export function pickTestTeacherOid(data: UniversityDataset, group: string | null): string | null {
+/** Логины тестовых преподавателей из env TEST_TEACHER_LOGINS; null — выбрать автоматически. */
+export function testTeacherLoginsFromEnv(value = process.env.TEST_TEACHER_LOGINS): string[] | null {
+  return testLoginsFromEnv(value);
+}
+
+/** Группы, у которых преподаватель ведёт занятия: oid → названия групп. */
+function teacherGroups(data: Pick<UniversityDataset, "lessons">): Map<string, Set<string>> {
   const groupsOf = new Map<string, Set<string>>();
   for (const l of data.lessons) {
     if (!l.teacherOid) continue;
@@ -73,15 +76,62 @@ export function pickTestTeacherOid(data: UniversityDataset, group: string | null
     for (const g of l.groups) set.add(g);
     groupsOf.set(l.teacherOid, set);
   }
-  const candidates = [...groupsOf.entries()].filter(([, gs]) => !group || gs.has(group));
-  candidates.sort(([a, ga], [b, gb]) => gb.size - ga.size || a.localeCompare(b));
-  return candidates[0]?.[0] ?? null;
+  return groupsOf;
+}
+
+/**
+ * Логины преподавателей так же, как их выдаёт импорт: логин из почты; занятый студентом,
+ * деканатом или другим преподавателем — с суффиксом «.t», «.t2»…
+ */
+export function teacherLogins(
+  data: Pick<UniversityDataset, "teachers" | "students" | "faculties">,
+  takenByOthers = new Set([...data.students.map((s) => s.login), ...data.faculties.map((f) => staffLoginForFaculty(f.code))]),
+): Map<string, string> {
+  const used = new Set<string>();
+  const out = new Map<string, string>();
+  for (const t of data.teachers) {
+    const base = teacherLogin(t);
+    let login = base;
+    for (let n = 1; takenByOthers.has(login) || used.has(login); n++) login = `${base}.t${n > 1 ? n : ""}`;
+    used.add(login);
+    out.set(t.oid, login);
+  }
+  return out;
+}
+
+export type TestTeacherPick = { oid: string; groups: string[] };
+
+/**
+ * Тестовые преподаватели для жюри — по одному на каждого тестового студента: ведёт занятия
+ * у его академической группы (чтобы пройти цепочку «оценка / сообщение группе → студент видит»);
+ * среди таких — с наибольшим числом групп, при равенстве — по oid. Уже выбранный преподаватель
+ * второй раз не берётся — тогда следующий кандидат. groups — группы тестовых студентов, которые он ведёт.
+ */
+export function pickTestTeachers(
+  data: Pick<UniversityDataset, "lessons">,
+  testStudents: Pick<StudentData, "academicGroup">[],
+): TestTeacherPick[] {
+  const groupsOf = teacherGroups(data);
+  const ranked = [...groupsOf.entries()].sort(([a, ga], [b, gb]) => gb.size - ga.size || a.localeCompare(b));
+  const picked: string[] = [];
+  for (const s of testStudents) {
+    const choice = ranked.find(([oid, gs]) => gs.has(s.academicGroup) && !picked.includes(oid));
+    if (choice) picked.push(choice[0]);
+  }
+  return picked.map((oid) => ({ oid, groups: testGroupsOf(groupsOf, oid, testStudents) }));
+}
+
+function testGroupsOf(groupsOf: Map<string, Set<string>>, oid: string, testStudents: Pick<StudentData, "academicGroup">[]) {
+  const gs = groupsOf.get(oid) ?? new Set<string>();
+  return [...new Set(testStudents.map((s) => s.academicGroup))].filter((g) => gs.has(g));
 }
 
 export type ImportOptions = {
   demoPassword: string;
   /** Логины тестовых студентов; пусто — выбрать автоматически (pickTestStudents). */
   testLogins?: string[] | null;
+  /** Логины тестовых преподавателей; пусто — по одному на тестового студента (pickTestTeachers). */
+  testTeacherLogins?: string[] | null;
   /** Куда записать логины и пароли; null — не записывать (в тестах). */
   credentialsPath: string | null;
   log?: (message: string) => void;
@@ -97,8 +147,9 @@ export type ImportSummary = {
   staff: { login: string; fullName: string; faculty: string }[];
   testStudents: { login: string; fullName: string; faculty: string; course: number; group: string }[];
   teachers: number;
-  /** Тестовый преподаватель (пароль — DEMO_PASSWORD); остальные получают случайные пароли */
-  testTeacher: { login: string; fullName: string } | null;
+  /** Тестовые преподаватели (пароль — DEMO_PASSWORD); остальные получают случайные пароли.
+   *  groups — группы тестовых студентов, у которых он ведёт занятия. */
+  testTeachers: { login: string; fullName: string; groups: string[] }[];
   buildings: number;
   rooms: number;
   disciplines: number;
@@ -222,22 +273,55 @@ export async function importUniversityData(
   const demoHashes = await hashAll([...testStudents, ...data.faculties].map(() => options.demoPassword));
   const testHash = new Map(testStudents.map((s, i) => [s.login, demoHashes[i]!]));
   const staffHash = data.faculties.map((_, i) => demoHashes[testStudents.length + i]!);
-  // Преподаватели. Общий DEMO_PASSWORD — только у ОДНОГО тестового (иначе по опубликованному паролю можно
-  // войти под любым преподавателем: логин — часть почты). Остальным — случайный пароль при создании
-  // аккаунта (и бывшему тестовому — новый); у существующих пароль не меняется.
-  const testTeacherOid = pickTestTeacherOid(data, testStudents[0]?.academicGroup ?? null);
+  // Преподаватели. Общий DEMO_PASSWORD — только у тестовых, по одному на тестового студента (иначе по
+  // опубликованному паролю можно войти под любым преподавателем: логин — часть почты). Остальным —
+  // случайный пароль при создании аккаунта (и бывшему тестовому — новый); у существующих пароль не меняется.
+  let testTeacherPicks: TestTeacherPick[];
+  if (options.testTeacherLogins && options.testTeacherLogins.length > 0) {
+    const oidByLogin = new Map([...teacherLogins(data)].map(([oid, login]) => [login, oid]));
+    const groupsOf = teacherGroups(data);
+    const oids = options.testTeacherLogins.map((login) => {
+      const oid = oidByLogin.get(login.trim().toLowerCase());
+      if (!oid) throw new ImportError(`TEST_TEACHER_LOGINS: преподавателя с логином «${login}» нет в schedule.csv`);
+      return oid;
+    });
+    testTeacherPicks = [...new Set(oids)].map((oid) => ({ oid, groups: testGroupsOf(groupsOf, oid, testStudents) }));
+    for (const [i, p] of testTeacherPicks.entries()) {
+      if (p.groups.length === 0) {
+        warnings.push(
+          `TEST_TEACHER_LOGINS: «${options.testTeacherLogins[i]}» не ведёт занятий ни у одной группы тестовых студентов — ` +
+            "цепочку «оценка → студент» на нём не показать.",
+        );
+      }
+    }
+  } else {
+    testTeacherPicks = pickTestTeachers(data, testStudents);
+    if (testTeacherPicks.length < testStudents.length) {
+      warnings.push(
+        `Тестовых преподавателей ${testTeacherPicks.length} из ${testStudents.length}: у некоторых групп тестовых ` +
+          "студентов нет преподавателя, которого можно выбрать (задайте TEST_TEACHER_LOGINS).",
+      );
+    }
+  }
+  const testTeacherGroups = new Map(testTeacherPicks.map((p) => [p.oid, p.groups]));
   const oldTeacherUsers = new Map(
-    (await db.teacher.findMany({ select: { oid: true, user: { select: { id: true, isDemo: true } } } })).map((t) => [t.oid, t.user]),
+    (await db.teacher.findMany({ select: { oid: true, user: { select: { id: true, login: true, isDemo: true } } } })).map((t) => [
+      t.oid,
+      t.user,
+    ]),
   );
   const teacherPasswords = data.teachers.map((t) => {
-    if (t.oid === testTeacherOid) return options.demoPassword;
+    if (testTeacherGroups.has(t.oid)) return options.demoPassword;
     const old = oldTeacherUsers.get(t.oid);
-    return !old || old.isDemo ? generatePassword() : null;
+    if (!old || old.isDemo) return generatePassword();
+    // Флаг сняли, а в credentials.csv остался демо-пароль или роль «тестовый» — тоже меняем
+    const row = credentials.get(old.login);
+    return row && (row.role === ROLE_TEST_TEACHER || demoPasswords.has(row.password)) ? generatePassword() : null;
   });
   const hashedTeacher = await hashAll(teacherPasswords.filter((p): p is string => p !== null));
   let hashCursor = 0;
   const teacherHashes = teacherPasswords.map((p) => (p === null ? null : hashedTeacher[hashCursor++]!));
-  let testTeacher: { login: string; fullName: string } | null = null;
+  const testTeachers: ImportSummary["testTeachers"] = [];
   const formerPasswords = formerTest.map(() => generatePassword());
   const formerHashes = await hashAll(formerPasswords);
   const facultyName = new Map(data.faculties.map((f) => [f.code, f.name]));
@@ -557,14 +641,11 @@ export async function importUniversityData(
         const takenByOthers = new Set(
           (await tx.user.findMany({ where: { role: { not: "TEACHER" } }, select: { login: true } })).map((u) => u.login),
         );
-        const usedTeacherLogins = new Set<string>();
+        const loginOf = teacherLogins(data, takenByOthers);
         for (const [i, t] of data.teachers.entries()) {
-          const base = teacherLogin(t);
-          let login = base;
-          for (let n = 1; takenByOthers.has(login) || usedTeacherLogins.has(login); n++) login = `${base}.t${n > 1 ? n : ""}`;
-          usedTeacherLogins.add(login);
+          const login = loginOf.get(t.oid)!;
           const tid = teacherId.get(t.oid)!;
-          const isTest = t.oid === testTeacherOid;
+          const isTest = testTeacherGroups.has(t.oid);
           const password = teacherPasswords[i]!;
           const hash = teacherHashes[i]!;
           const existing = await tx.teacher.findUnique({
@@ -596,10 +677,14 @@ export async function importUniversityData(
             await tx.teacher.update({ where: { id: tid }, data: { userId } });
           }
           if (password) {
-            credentials.set(login, { login, fullName: t.fullName, email: t.email ?? "", role: ROLE_TEACHER, password });
+            const role = isTest ? ROLE_TEST_TEACHER : ROLE_TEACHER;
+            credentials.set(login, { login, fullName: t.fullName, email: t.email ?? "", role, password });
           }
-          if (isTest) testTeacher = { login, fullName: t.fullName };
+          if (isTest) testTeachers.push({ login, fullName: t.fullName, groups: testTeacherGroups.get(t.oid)! });
         }
+        // В порядке выбора (как тестовые студенты), а не в порядке schedule.csv
+        const order = new Map(testTeacherPicks.map((p, i) => [loginOf.get(p.oid), i]));
+        testTeachers.sort((a, b) => order.get(a.login)! - order.get(b.login)!);
         // Аккаунты преподавателей, которых больше нет в расписании
         await tx.user.deleteMany({ where: { role: "TEACHER", teacher: null } });
 
@@ -637,7 +722,7 @@ export async function importUniversityData(
       group: s.academicGroup,
     })),
     teachers: data.teachers.length,
-    testTeacher,
+    testTeachers,
     buildings: data.buildings.length,
     rooms: data.rooms.length,
     disciplines: data.disciplines.length,

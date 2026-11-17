@@ -19,7 +19,14 @@ export function DeleteMarkButton({ markId, label }: { markId: string; label: str
         if (!window.confirm(`Удалить ${label}?`)) return;
         const formData = new FormData();
         formData.set("markId", markId);
-        startTransition(() => deleteMarkAction(formData));
+        startTransition(async () => {
+          try {
+            const result = await deleteMarkAction(formData);
+            if (result.error) window.alert(result.error);
+          } catch {
+            window.alert("Не удалось удалить оценку. Проверьте интернет и попробуйте ещё раз.");
+          }
+        });
       }}
     >
       {pending ? <Loader2 className="size-5 animate-spin" aria-hidden /> : <Trash2 className="size-5" aria-hidden />}

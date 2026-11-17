@@ -13,13 +13,14 @@ import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { db } from "@/lib/db";
 import { ROLE_STUDENT, credentialsCsv } from "@/lib/university-data/credentials";
 import { parseCsv } from "@/lib/university-data/csv";
-import { DEFAULT_DEMO_PASSWORD, importUniversityData, testLoginsFromEnv } from "@/lib/university-data/import";
+import { DEFAULT_DEMO_PASSWORD, importUniversityData, testLoginsFromEnv, testTeacherLoginsFromEnv } from "@/lib/university-data/import";
 import { loadUniversityData, universityDataDir } from "@/lib/university-data/load";
 
 const tmp = mkdtempSync(path.join(tmpdir(), "import-again-"));
 // Те же тестовые аккаунты, что выбирает скрипт импорта: иначе при заданной TEST_STUDENT_LOGINS
 // тест «сбросил» бы их на автоматически выбранных студентов.
 const testLogins = testLoginsFromEnv();
+const testTeacherLogins = testTeacherLoginsFromEnv();
 
 afterAll(async () => {
   rmSync(tmp, { recursive: true, force: true });
@@ -60,6 +61,7 @@ describe("Повторный импорт", () => {
     const summary = await importUniversityData(db, result.data, {
       demoPassword: process.env.DEMO_PASSWORD || DEFAULT_DEMO_PASSWORD,
       testLogins,
+      testTeacherLogins,
       credentialsPath,
     });
     expect(summary.createdAccounts).toBe(0);
@@ -75,13 +77,19 @@ describe("Повторный импорт", () => {
     expect(after.lessons).toBe(result.data.lessons.length);
     expect(after.lessonGroups).toBe(result.data.scheduleRows);
 
-    // Тестовым аккаунтам, деканатам и одному тестовому преподавателю импорт ставит DEMO_PASSWORD
+    // Тестовым студентам, деканатам и тестовым преподавателям (по одному на тестового студента) импорт ставит DEMO_PASSWORD
     const demo = after.users.filter((u) => u.isDemo);
-    expect(summary.testTeacher).not.toBeNull();
-    expect(demo.length).toBe((testLogins?.length ?? 3) + result.data.faculties.length + 1);
+    const testStudentCount = testLogins?.length ?? 3;
+    expect(summary.testTeachers).toHaveLength(testTeacherLogins?.length ?? testStudentCount);
+    if (!testTeacherLogins) {
+      // Каждый тестовый студент учится в группе, у которой ведёт занятия хотя бы один тестовый преподаватель
+      const taught = new Set(summary.testTeachers.flatMap((t) => t.groups));
+      for (const s of summary.testStudents) expect(taught).toContain(s.group);
+    }
+    expect(demo.length).toBe(testStudentCount + result.data.faculties.length + summary.testTeachers.length);
     for (const u of demo) expect(await verifyPassword(u.passwordHash, process.env.DEMO_PASSWORD || DEFAULT_DEMO_PASSWORD)).toBe(true);
 
-    // Новых аккаунтов нет — в файле только демо-аккаунты (тестовые студенты, деканаты, тестовый преподаватель), UTF-8 с BOM и «;»
+    // Новых аккаунтов нет — в файле только демо-аккаунты (тестовые студенты, деканаты, тестовые преподаватели), UTF-8 с BOM и «;»
     const text = readFileSync(credentialsPath, "utf8");
     expect(text.charCodeAt(0)).toBe(0xfeff);
     const table = parseCsv(text);
@@ -95,6 +103,7 @@ describe("Повторный импорт", () => {
     const options = {
       demoPassword: process.env.DEMO_PASSWORD || DEFAULT_DEMO_PASSWORD,
       testLogins,
+      testTeacherLogins,
       credentialsPath: path.join(tmp, "swap.csv"),
     };
     // Два обычных (не тестовых) студента меняются почтой и зачёткой

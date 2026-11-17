@@ -9,6 +9,8 @@ cd "$(dirname "$0")/.."
 # Разрешаем оба адреса. Задаём здесь, при запуске, — так переменная точно дойдёт до сервера.
 # Значение задаётся всегда, а не «если не задано»: в контейнере может остаться старое
 # неполное значение из прежней версии настройки (так и было — вход продолжал падать).
+# Версия сборки (next.config.ts → deploymentId): одна и та же при сборке и при запуске
+export DEPLOYMENT_VERSION="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
 export SERVER_ACTIONS_ALLOWED_ORIGINS="*.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev},localhost:3000"
 
 # Обновляемся, только если вы ничего не меняли в файлах сами — чтобы не потерять ваши правки.
