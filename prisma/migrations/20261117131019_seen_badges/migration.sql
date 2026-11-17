@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "Request" ADD COLUMN     "statusSeen" BOOLEAN NOT NULL DEFAULT true;
+
+-- AlterTable
+ALTER TABLE "Student" ADD COLUMN     "marksSeenAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;

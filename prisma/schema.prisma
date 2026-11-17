@@ -18,6 +18,8 @@ datasource db {
 enum Role {
   STUDENT
   STAFF
+  /// Преподаватель: расписание, оценки и рассылка только своим группам (docs/TEACHERS.md)
+  TEACHER
 }
 
 model User {
@@ -32,6 +34,7 @@ model User {
 
   student       Student?
   staff         Staff?
+  teacher       Teacher?
   sessions      Session[]
   notifications Notification[]
   announcements Announcement[]
@@ -147,6 +150,8 @@ model Student {
   languageGroups  StudentGroup[]
   grades          Grade[]
   marks           Mark[]
+  /// Когда студент последний раз открывал «Оценки»: оценки, выставленные позже, — «новые» (кружок в меню)
+  marksSeenAt     DateTime       @default(now())
   requests        Request[]
 
   @@index([facultyId])
@@ -181,17 +186,24 @@ model Staff {
 // ─── Расписание (из schedule.csv и campus-map.json; при импорте заменяется целиком) ─
 
 model Teacher {
-  id        String   @id @default(cuid())
+  id            String         @id @default(cuid())
   /// lecturerOid из schedule.csv (если пуст — краткое ФИО)
-  oid       String   @unique
+  oid           String         @unique
   /// «Арсеньева П.Н.»
-  shortName String
+  shortName     String
   /// «Арсеньева Полина Николаевна»
-  fullName  String
+  fullName      String
   /// «ст. преподаватель»
-  rank      String?
-  email     String?
-  lessons   Lesson[]
+  rank          String?
+  email         String?
+  /// Аккаунт преподавателя (создаёт импорт: логин из почты, пароль DEMO_PASSWORD)
+  userId        String?        @unique
+  user          User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  lessons       Lesson[]
+  /// Оценки, которые выставил преподаватель
+  marks         Mark[]
+  /// События, адресованные лично этому преподавателю
+  announcements Announcement[]
 }
 
 /// Корпус. Страница карты читает campus-map.json напрямую (lib/campus-map/load.ts), а не эту таблицу;
@@ -371,12 +383,16 @@ model Mark {
   /// Кто выставил (сотрудник деканата); null — демо-наполнение или сотрудник удалён
   createdById  String?
   createdBy    Staff?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  /// Или преподаватель, который выставил оценку (на своём занятии)
+  teacherId    String?
+  teacher      Teacher?   @relation(fields: [teacherId], references: [id], onDelete: SetNull)
   createdAt    DateTime   @default(now())
 
   @@index([studentId, date])
   @@index([lessonId])
   @@index([lessonOid])
   @@index([createdById, createdAt])
+  @@index([teacherId, createdAt])
 }
 
 // ─── Заявки и справки ───────────────────────────────────────────────
@@ -409,6 +425,8 @@ model Request {
   payload      Json
   status       RequestStatus @default(SUBMITTED)
   staffComment String?
+  /// false — деканат изменил статус, а студент ещё не открывал заявки (кружок на пункте «Заявки»)
+  statusSeen   Boolean       @default(true)
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
@@ -418,26 +436,46 @@ model Request {
 
 // ─── Объявления и уведомления ───────────────────────────────────────
 
+enum AnnouncementAudience {
+  /// Все студенты факультета
+  FACULTY
+  /// Студенты курса факультета
+  COURSE
+  /// Студенты группы
+  GROUP
+  /// Все преподаватели, которые ведут занятия у групп факультета
+  ALL_TEACHERS
+  /// Один преподаватель
+  TEACHER
+  /// Все группы преподавателя-автора
+  MY_GROUPS
+}
+
 /// Событие деканата: сообщение, дата экзамена, срок сдачи… Создаёт только деканат (/staff/notifications).
 /// При создании каждому получателю создаётся уведомление (Notification) — студент видит его,
 /// когда наступит publishedAt (отложенная отправка без фоновых задач).
 model Announcement {
-  id            String           @id @default(cuid())
+  id            String               @id @default(cuid())
   authorId      String
-  author        User             @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  author        User                 @relation(fields: [authorId], references: [id], onDelete: Cascade)
   /// Вид события — он же тип уведомлений получателей
-  kind          NotificationType @default(ANNOUNCEMENT)
+  kind          NotificationType     @default(ANNOUNCEMENT)
+  /// Кому: студентам (факультет / курс / группа / группы преподавателя) или преподавателям
+  audience      AnnouncementAudience @default(FACULTY)
+  /// Для audience = TEACHER — кому из преподавателей
+  teacherId     String?
+  teacher       Teacher?             @relation(fields: [teacherId], references: [id], onDelete: SetNull)
   title         String
   body          String
   /// Аудитория: если поля пустые — для всех. Иначе — только для факультета / курса / группы.
   facultyId     String?
-  faculty       Faculty?         @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+  faculty       Faculty?             @relation(fields: [facultyId], references: [id], onDelete: Cascade)
   course        Int?
   groupId       String?
-  group         Group?           @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  group         Group?               @relation(fields: [groupId], references: [id], onDelete: Cascade)
   /// Время отправки: студенты увидят уведомление начиная с этого момента
-  publishedAt   DateTime         @default(now())
-  createdAt     DateTime         @default(now())
+  publishedAt   DateTime             @default(now())
+  createdAt     DateTime             @default(now())
   notifications Notification[]
 
   @@index([publishedAt])

@@ -115,7 +115,7 @@ function BellButton({ href, unread }: ShellNotifications) {
       <Bell className="size-5" aria-hidden />
       {unread > 0 && (
         <span
-          className="absolute top-1.5 right-1 min-w-[18px] rounded-full bg-danger px-1 text-center text-[11px] leading-[18px] font-semibold text-on-primary"
+          className="absolute top-1.5 right-1 min-w-[18px] rounded-full bg-primary px-1 text-center text-[11px] leading-[18px] font-semibold text-on-primary"
           aria-hidden
         >
           {unread > 99 ? "99+" : unread}

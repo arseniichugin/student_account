@@ -4,7 +4,7 @@
  * Нужна заполненная база: npm run db:setup.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { StaffContext, StudentContext } from "@/lib/auth/guards";
+import type { RecipientContext, StaffContext, StudentContext } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
 import {
   countMyUnreadNotifications,
@@ -25,6 +25,9 @@ async function staffCtxFor(facultyId: string): Promise<StaffContext> {
   const staff = await db.staff.findFirstOrThrow({ where: { facultyId } });
   return { userId: staff.userId, staffId: staff.id, facultyId } as StaffContext;
 }
+
+/** В приложении получатель создаётся из сессии (requireRecipient); здесь — из контекста студента. */
+const rcpt = (s: StudentContext) => ({ userId: s.userId, role: "STUDENT" }) as RecipientContext;
 
 let studentA: StudentContext; // факультет A
 let studentB: StudentContext; // факультет B
@@ -97,8 +100,8 @@ describe("События деканата: получатели и видимо�
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.recipients).toBe(await db.student.count({ where: { facultyId: facultyA } }));
-    expect((await listMyNotifications(studentA)).some((n) => n.title === "Всем факультета A")).toBe(true);
-    expect((await listMyNotifications(studentB)).some((n) => n.title === "Всем факультета A")).toBe(false);
+    expect((await listMyNotifications(rcpt(studentA))).some((n) => n.title === "Всем факультета A")).toBe(true);
+    expect((await listMyNotifications(rcpt(studentB))).some((n) => n.title === "Всем факультета A")).toBe(false);
   });
 
   it("«группе» — только студенты группы (академической или языковой)", async () => {
@@ -109,7 +112,7 @@ describe("События деканата: получатели и видимо�
       where: { facultyId: facultyA, OR: [{ academicGroupId: groupA }, { languageGroups: { some: { groupId: groupA } } }] },
     });
     expect(r.recipients).toBe(expected);
-    expect((await listMyNotifications(studentA)).some((n) => n.title === "Группе A")).toBe(true);
+    expect((await listMyNotifications(rcpt(studentA))).some((n) => n.title === "Группе A")).toBe(true);
   });
 
   it("«курсу» — только студенты этого курса", async () => {
@@ -134,13 +137,13 @@ describe("События деканата: получатели и видимо�
     const now = new Date();
     const r = await send(staffA, { title: "Отложенное", sendAt: new Date(now.getTime() + HOUR) }, now);
     expect(r.ok && r.scheduled).toBe(true);
-    expect((await listMyNotifications(studentA, now)).some((n) => n.title === "Отложенное")).toBe(false);
+    expect((await listMyNotifications(rcpt(studentA), now)).some((n) => n.title === "Отложенное")).toBe(false);
     const later = new Date(now.getTime() + 2 * HOUR);
-    expect((await listMyNotifications(studentA, later)).some((n) => n.title === "Отложенное")).toBe(true);
+    expect((await listMyNotifications(rcpt(studentA), later)).some((n) => n.title === "Отложенное")).toBe(true);
     // «Прочитать всё» сейчас не трогает ещё не пришедшее
-    await markMyNotificationsRead(studentA, now);
-    expect(await countMyUnreadNotifications(studentA, now)).toBe(0);
-    expect(await countMyUnreadNotifications(studentA, later)).toBeGreaterThan(0);
+    await markMyNotificationsRead(rcpt(studentA), now);
+    expect(await countMyUnreadNotifications(rcpt(studentA), now)).toBe(0);
+    expect(await countMyUnreadNotifications(rcpt(studentA), later)).toBeGreaterThan(0);
     // В списке деканата — среди запланированных
     const list = await listFacultyAnnouncements(staffA, now);
     expect(list.find((a) => a.title === "Отложенное")?.scheduled).toBe(true);
@@ -163,7 +166,7 @@ describe("События деканата: получатели и видимо�
   });
 
   it("студент видит только свои уведомления", async () => {
-    const mine = await listMyNotifications(studentA);
+    const mine = await listMyNotifications(rcpt(studentA));
     const foreign = await db.notification.count({ where: { id: { in: mine.map((n) => n.id) }, userId: { not: studentA.userId } } });
     expect(foreign).toBe(0);
   });

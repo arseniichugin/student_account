@@ -16,6 +16,7 @@ const requestListSelect = {
   status: true,
   createdAt: true,
   updatedAt: true,
+  statusSeen: true,
   type: { select: { name: true, etaDays: true } },
 } as const;
 
@@ -45,6 +46,20 @@ export function getMyRequest(ctx: StudentContext, requestId: string) {
 }
 
 /** Защита от спама: сколько заявок может быть «в работе» одновременно и сколько можно подать за час. */
+/** Сколько заявок студента изменили статус с тех пор, как он открывал «Заявки» (кружок в меню). */
+export function countMyChangedRequests(ctx: StudentContext) {
+  return db.request.count({ where: { studentId: ctx.studentId, statusSeen: false } });
+}
+
+/** Студент увидел изменения: все его заявки (или одну) — просмотрены. */
+export async function markMyRequestsSeen(ctx: StudentContext, requestId?: string): Promise<number> {
+  const { count } = await db.request.updateMany({
+    where: { studentId: ctx.studentId, statusSeen: false, ...(requestId ? { id: requestId } : {}) },
+    data: { statusSeen: true },
+  });
+  return count;
+}
+
 export const MAX_ACTIVE_REQUESTS = 10;
 export const MAX_REQUESTS_PER_HOUR = 5;
 
@@ -120,7 +135,7 @@ export async function updateFacultyRequestStatus(ctx: StaffContext, input: Updat
   return db.$transaction(async (tx) => {
     const updated = await tx.request.update({
       where: { id: request.id },
-      data: { status: input.status, staffComment: input.comment || null },
+      data: { status: input.status, staffComment: input.comment || null, statusSeen: false },
       select: { id: true, status: true },
     });
     await tx.notification.create({

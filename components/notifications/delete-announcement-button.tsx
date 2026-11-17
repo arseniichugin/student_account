@@ -3,10 +3,20 @@
 import { useTransition } from "react";
 import { Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { deleteAnnouncementAction } from "./actions";
+import { deleteStaffAnnouncementAction, deleteTeacherAnnouncementAction } from "@/lib/notifications/form-actions";
 
 /** Отменить запланированное или отозвать отправленное событие — только после подтверждения. */
-export function DeleteAnnouncementButton({ id, title, scheduled }: { id: string; title: string; scheduled: boolean }) {
+export function DeleteAnnouncementButton({
+  id,
+  title,
+  scheduled,
+  mode,
+}: {
+  id: string;
+  title: string;
+  scheduled: boolean;
+  mode: "staff" | "teacher";
+}) {
   const [pending, startTransition] = useTransition();
   const verb = scheduled ? "Отменить отправку" : "Удалить у всех получателей";
   return (
@@ -23,7 +33,7 @@ export function DeleteAnnouncementButton({ id, title, scheduled }: { id: string;
         formData.set("announcementId", id);
         startTransition(async () => {
           try {
-            const result = await deleteAnnouncementAction(formData);
+            const result = await (mode === "staff" ? deleteStaffAnnouncementAction : deleteTeacherAnnouncementAction)(formData);
             if (result.error) window.alert(result.error);
           } catch {
             window.alert("Не удалось удалить событие. Проверьте интернет и попробуйте ещё раз.");

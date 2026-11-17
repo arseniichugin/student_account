@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, CalendarDays, ChartColumn, FileText, Inbox, MapPinned, NotebookPen, Sun, UserRound } from "lucide-react";
+import { Bell, CalendarDays, Send, ChartColumn, FileText, Inbox, MapPinned, NotebookPen, Sun, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { activeNavHref, type NavIcon, type NavItem } from "@/lib/navigation";
@@ -17,6 +17,7 @@ const ICONS: Record<NavIcon, typeof Sun> = {
   chart: ChartColumn,
   pen: NotebookPen,
   bell: Bell,
+  send: Send,
 };
 
 const STYLES = {
@@ -56,12 +57,28 @@ export function NavLinks({ items, variant }: { items: NavItem[]; variant: keyof 
               aria-current={active ? "page" : undefined}
               className={cn(s.link, active ? s.active : s.idle)}
             >
-              <Icon className={s.icon} aria-hidden />
+              {variant === "bottom" ? (
+                <span className="relative">
+                  <Icon className={s.icon} aria-hidden />
+                  {badge ? (
+                    <span
+                      className="absolute -top-1.5 left-3.5 min-w-[18px] rounded-full bg-primary px-1 text-center text-[11px] leading-[18px] font-semibold text-on-primary"
+                      aria-hidden
+                    >
+                      {badge > 99 ? "99+" : badge}
+                    </span>
+                  ) : null}
+                </span>
+              ) : (
+                <Icon className={s.icon} aria-hidden />
+              )}
               <span className="max-w-full truncate">{label}</span>
-              {badge ? (
+              {/* Для экранного диктора число — после названия: «Оценки, 3 новых» */}
+              {badge && variant === "bottom" ? <span className="sr-only">, новых: {badge}</span> : null}
+              {badge && variant === "side" ? (
                 <span className="ml-auto min-w-6 rounded-full bg-primary px-1.5 text-center text-xs leading-6 font-semibold text-on-primary">
                   {badge > 99 ? "99+" : badge}
-                  <span className="sr-only"> непрочитанных</span>
+                  <span className="sr-only"> новых</span>
                 </span>
               ) : null}
             </Link>

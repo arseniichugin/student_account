@@ -75,12 +75,13 @@ describe("Повторный импорт", () => {
     expect(after.lessons).toBe(result.data.lessons.length);
     expect(after.lessonGroups).toBe(result.data.scheduleRows);
 
-    // Тестовым аккаунтам и деканатам импорт ставит DEMO_PASSWORD
+    // Тестовым аккаунтам, деканатам и одному тестовому преподавателю импорт ставит DEMO_PASSWORD
     const demo = after.users.filter((u) => u.isDemo);
-    expect(demo.length).toBe((testLogins?.length ?? 3) + result.data.faculties.length);
+    expect(summary.testTeacher).not.toBeNull();
+    expect(demo.length).toBe((testLogins?.length ?? 3) + result.data.faculties.length + 1);
     for (const u of demo) expect(await verifyPassword(u.passwordHash, process.env.DEMO_PASSWORD || DEFAULT_DEMO_PASSWORD)).toBe(true);
 
-    // Новых аккаунтов нет — в файле только тестовые студенты и деканаты, UTF-8 с BOM и «;»
+    // Новых аккаунтов нет — в файле только демо-аккаунты (тестовые студенты, деканаты, тестовый преподаватель), UTF-8 с BOM и «;»
     const text = readFileSync(credentialsPath, "utf8");
     expect(text.charCodeAt(0)).toBe(0xfeff);
     const table = parseCsv(text);

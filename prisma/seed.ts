@@ -9,7 +9,7 @@
  * Запуск: npm run db:seed (после npm run data:import). Повторный запуск даёт тот же результат.
  */
 import "dotenv/config";
-import type { GradeKind, NotificationType, RequestStatus } from "@/lib/generated/prisma/client";
+import type { AnnouncementAudience, GradeKind, NotificationType, RequestStatus } from "@/lib/generated/prisma/client";
 import { dbDateToIso, isoDateToDb, moscowDateTime, moscowToday } from "@/lib/moscow-time";
 import { createPrismaClient } from "@/lib/prisma-client";
 import { formatDayMonthLong } from "@/lib/schedule/dates";
@@ -255,9 +255,20 @@ async function main() {
   // «Уровень» студента задаёт, какие оценки ему чаще ставят. Детерминировано для одного и того же дня запуска.
   console.log("Оценки на занятиях…");
   const today = moscowToday();
+  const seedNow = new Date();
   const pastLessons = await db.lesson.findMany({
     where: { status: { not: "CANCELLED" }, date: { lte: isoDateToDb(today) } },
-    select: { id: true, oid: true, date: true, startTime: true, kind: true, disciplineId: true, groups: { select: { groupId: true } } },
+    select: {
+      id: true,
+      oid: true,
+      date: true,
+      startTime: true,
+      endTime: true,
+      kind: true,
+      disciplineId: true,
+      teacherId: true,
+      groups: { select: { groupId: true } },
+    },
   });
   const lessonsByGroup = new Map<string, typeof pastLessons>();
   for (const l of pastLessons) {
@@ -279,6 +290,8 @@ async function main() {
     lessonKind: string;
     value: number;
     createdById: null;
+    teacherId: string | null;
+    createdAt: Date;
   }[] = [];
   for (const s of students) {
     const level = LEVELS[debtors.has(s.id) ? 2 : hash(`level:${s.externalId}`) % 3]!;
@@ -286,6 +299,8 @@ async function main() {
     for (const groupId of [s.academicGroupId, ...s.languageGroups.map((g) => g.groupId)]) {
       for (const l of lessonsByGroup.get(groupId) ?? []) {
         if (seen.has(l.id)) continue;
+        // Только уже закончившиеся занятия: оценка «выставлена» после конца пары, не в будущем
+        if (moscowDateTime(dbDateToIso(l.date), l.endTime) > seedNow) continue;
         seen.add(l.id);
         const rand = rng(`mark:${s.externalId}:${l.oid}`);
         const lecture = /лекц/i.test(l.kind);
@@ -301,14 +316,20 @@ async function main() {
             startTime: l.startTime,
             lessonKind: l.kind,
             value: pick(rand, level),
+            // «Выставлена» после занятия — от этого считается кружок «новых оценок»
+            createdAt: moscowDateTime(dbDateToIso(l.date), l.endTime),
             // null — демо-наполнение: в «Последних выставленных» у деканата видны только оценки, введённые через форму
             createdById: null,
+            // Выставил преподаватель этого занятия — видно в его «Последних выставленных»
+            teacherId: l.teacherId,
           });
         }
       }
     }
   }
   for (let i = 0; i < marks.length; i += 5000) await db.mark.createMany({ data: marks.slice(i, i + 5000) });
+  // «Последний раз открывали оценки» — двое суток назад: оценки за эти дни видны как новые
+  await db.student.updateMany({ data: { marksSeenAt: new Date(Date.now() - 2 * 86_400_000) } });
 
   // ─── Заявки ───────────────────────────────────────────────────────
   console.log("Заявки…");
@@ -422,6 +443,8 @@ async function main() {
         staffComment: r.staffComment ?? null,
         createdAt: r.createdAt,
         updatedAt: r.createdAt,
+        // Деканат изменил статус, а студент ещё не смотрел (кружок на «Заявках»); выданные и новые — просмотрены
+        statusSeen: r.status === "SUBMITTED" || r.status === "ISSUED",
       },
       select: { id: true },
     });
@@ -488,6 +511,8 @@ async function main() {
     course?: number | null;
     publishedAt: Date;
     kind?: NotificationType;
+    audience?: AnnouncementAudience;
+    groupId?: string | null;
   };
   const announcements: AnnouncementSeed[] = [];
   for (const f of faculties) {
@@ -538,6 +563,51 @@ async function main() {
       publishedAt: msk(2026, 11, 7, 9, 0),
     });
   }
+  // Деканаты — всем преподавателям, которые ведут занятия у факультета
+  for (const f of faculties) {
+    const author = staffUserByFaculty.get(f.id);
+    if (!author) continue;
+    announcements.push({
+      authorId: author,
+      title: "Ведомости зимней сессии",
+      body: "Заполненные ведомости зачётов и экзаменов сдайте в деканат до 30 января. Бланки — у секретаря.",
+      facultyId: f.id,
+      audience: "ALL_TEACHERS",
+      kind: "DEADLINE",
+      publishedAt: msk(2026, 11, 10, 11, 0),
+    });
+  }
+  // Преподаватель — группе первого тестового студента: о контрольной
+  const firstTest = testStudents[0];
+  if (firstTest) {
+    const lesson = await db.lesson.findFirst({
+      where: { teacherId: { not: null }, groups: { some: { groupId: firstTest.academicGroupId } }, teacher: { userId: { not: null } } },
+      orderBy: [{ date: "asc" }],
+      select: { discipline: { select: { name: true } }, teacher: { select: { userId: true } } },
+    });
+    if (lesson?.teacher?.userId) {
+      announcements.push({
+        authorId: lesson.teacher.userId,
+        title: `${lesson.discipline.name}: контрольная работа`,
+        body: "На следующем занятии — контрольная работа по пройденным темам. Повторите конспекты.",
+        audience: "GROUP",
+        groupId: firstTest.academicGroupId,
+        kind: "EXAM",
+        publishedAt: msk(2026, 11, 14, 18, 0),
+      });
+    }
+  }
+  const teacherUsers = new Map(
+    (
+      await db.teacher.findMany({
+        where: { userId: { not: null } },
+        select: { userId: true, lessons: { select: { groups: { select: { group: { select: { facultyId: true } } } } } } },
+      })
+    ).map((t) => [t.userId!, new Set(t.lessons.flatMap((l) => l.groups.map((g) => g.group.facultyId)))]),
+  );
+  // Аудитория прежних событий — по заполненным полям
+  for (const a of announcements) a.audience ??= a.course != null ? "COURSE" : "FACULTY";
+
   // Создаём по одному, чтобы знать id: уведомления получателей ссылаются на событие
   const createdAnnouncements: (AnnouncementSeed & { id: string })[] = [];
   for (const a of announcements) {
@@ -610,9 +680,17 @@ async function main() {
   // Часть уже прочитана; у тестовых студентов — не прочитаны, чтобы на колокольчике было число.
   const testIds = new Set(testStudents.map((s) => s.id));
   for (const a of createdAnnouncements) {
+    if (a.audience === "ALL_TEACHERS") {
+      for (const [userId, facultyIds] of teacherUsers) {
+        if (a.facultyId && !facultyIds.has(a.facultyId)) continue;
+        notifications.push({ userId, type: a.kind ?? "ANNOUNCEMENT", title: a.title, body: a.body, createdAt: a.publishedAt, announcementId: a.id });
+      }
+      continue;
+    }
     for (const s of students) {
       if (a.facultyId && a.facultyId !== s.facultyId) continue;
       if (a.course != null && a.course !== s.course) continue;
+      if (a.groupId && a.groupId !== s.academicGroupId && !s.languageGroups.some((g) => g.groupId === a.groupId)) continue;
       const read = !testIds.has(s.id) && rng(`read:${a.id}:${s.externalId}`)() < 0.6;
       notifications.push({
         userId: s.userId,

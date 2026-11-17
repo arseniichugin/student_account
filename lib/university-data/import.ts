@@ -17,6 +17,7 @@ import { isoDateToDb, moscowDateTime } from "@/lib/moscow-time";
 import {
   ROLE_STAFF,
   ROLE_STUDENT,
+  ROLE_TEACHER,
   ROLE_TEST_STUDENT,
   commitCredentials,
   discardCredentials,
@@ -26,7 +27,13 @@ import {
   writeCredentialsTemp,
   type CredentialRow,
 } from "@/lib/university-data/credentials";
-import { pickTestStudents, staffLoginForFaculty, type StudentData, type UniversityDataset } from "@/lib/university-data/validate";
+import {
+  pickTestStudents,
+  staffLoginForFaculty,
+  teacherLogin,
+  type StudentData,
+  type UniversityDataset,
+} from "@/lib/university-data/validate";
 
 export const DEFAULT_DEMO_PASSWORD = "Hogwarts2026";
 
@@ -54,6 +61,23 @@ const STAFF_POSITION = "Специалист по учебной работе";
 
 export class ImportError extends Error {}
 
+/**
+ * Тестовый преподаватель для жюри: ведёт занятия у академической группы первого тестового студента
+ * (чтобы было видно всю цепочку «оценка → студент»); среди таких — с наибольшим числом групп.
+ */
+export function pickTestTeacherOid(data: UniversityDataset, group: string | null): string | null {
+  const groupsOf = new Map<string, Set<string>>();
+  for (const l of data.lessons) {
+    if (!l.teacherOid) continue;
+    const set = groupsOf.get(l.teacherOid) ?? new Set<string>();
+    for (const g of l.groups) set.add(g);
+    groupsOf.set(l.teacherOid, set);
+  }
+  const candidates = [...groupsOf.entries()].filter(([, gs]) => !group || gs.has(group));
+  candidates.sort(([a, ga], [b, gb]) => gb.size - ga.size || a.localeCompare(b));
+  return candidates[0]?.[0] ?? null;
+}
+
 export type ImportOptions = {
   demoPassword: string;
   /** Логины тестовых студентов; пусто — выбрать автоматически (pickTestStudents). */
@@ -73,6 +97,8 @@ export type ImportSummary = {
   staff: { login: string; fullName: string; faculty: string }[];
   testStudents: { login: string; fullName: string; faculty: string; course: number; group: string }[];
   teachers: number;
+  /** Тестовый преподаватель (пароль — DEMO_PASSWORD); остальные получают случайные пароли */
+  testTeacher: { login: string; fullName: string } | null;
   buildings: number;
   rooms: number;
   disciplines: number;
@@ -196,6 +222,22 @@ export async function importUniversityData(
   const demoHashes = await hashAll([...testStudents, ...data.faculties].map(() => options.demoPassword));
   const testHash = new Map(testStudents.map((s, i) => [s.login, demoHashes[i]!]));
   const staffHash = data.faculties.map((_, i) => demoHashes[testStudents.length + i]!);
+  // Преподаватели. Общий DEMO_PASSWORD — только у ОДНОГО тестового (иначе по опубликованному паролю можно
+  // войти под любым преподавателем: логин — часть почты). Остальным — случайный пароль при создании
+  // аккаунта (и бывшему тестовому — новый); у существующих пароль не меняется.
+  const testTeacherOid = pickTestTeacherOid(data, testStudents[0]?.academicGroup ?? null);
+  const oldTeacherUsers = new Map(
+    (await db.teacher.findMany({ select: { oid: true, user: { select: { id: true, isDemo: true } } } })).map((t) => [t.oid, t.user]),
+  );
+  const teacherPasswords = data.teachers.map((t) => {
+    if (t.oid === testTeacherOid) return options.demoPassword;
+    const old = oldTeacherUsers.get(t.oid);
+    return !old || old.isDemo ? generatePassword() : null;
+  });
+  const hashedTeacher = await hashAll(teacherPasswords.filter((p): p is string => p !== null));
+  let hashCursor = 0;
+  const teacherHashes = teacherPasswords.map((p) => (p === null ? null : hashedTeacher[hashCursor++]!));
+  let testTeacher: { login: string; fullName: string } | null = null;
   const formerPasswords = formerTest.map(() => generatePassword());
   const formerHashes = await hashAll(formerPasswords);
   const facultyName = new Map(data.faculties.map((f) => [f.code, f.name]));
@@ -509,6 +551,58 @@ export async function importUniversityData(
           credentials.set(login, { login, fullName, email: "", role: ROLE_STAFF, password: options.demoPassword });
         }
 
+        // Преподаватели: аккаунт на каждого, логин из почты. Пароль — см. teacherPasswords выше.
+        // Логин, уже занятый студентом или сотрудником, получает суффикс «.t», «.t2»…
+        log("Аккаунты преподавателей…");
+        const takenByOthers = new Set(
+          (await tx.user.findMany({ where: { role: { not: "TEACHER" } }, select: { login: true } })).map((u) => u.login),
+        );
+        const usedTeacherLogins = new Set<string>();
+        for (const [i, t] of data.teachers.entries()) {
+          const base = teacherLogin(t);
+          let login = base;
+          for (let n = 1; takenByOthers.has(login) || usedTeacherLogins.has(login); n++) login = `${base}.t${n > 1 ? n : ""}`;
+          usedTeacherLogins.add(login);
+          const tid = teacherId.get(t.oid)!;
+          const isTest = t.oid === testTeacherOid;
+          const password = teacherPasswords[i]!;
+          const hash = teacherHashes[i]!;
+          const existing = await tx.teacher.findUnique({
+            where: { id: tid },
+            select: { userId: true, user: { select: { login: true } } },
+          });
+          let userId = existing?.userId ?? null;
+          if (userId) {
+            await tx.user.update({
+              where: { id: userId },
+              data: { login, isDemo: isTest, ...(hash ? { passwordHash: hash } : {}) },
+            });
+            // Пароль сменился (бывший тестовый) — закрываем его входы на всех устройствах
+            if (hash && !isTest) await tx.session.deleteMany({ where: { userId } });
+            const oldLogin = existing?.user?.login;
+            if (!password && oldLogin && oldLogin !== login) {
+              const row = credentials.get(oldLogin);
+              if (row) credentials.set(login, { ...row, login });
+            }
+          } else {
+            const user = await tx.user.upsert({
+              where: { login },
+              create: { login, passwordHash: hash!, role: "TEACHER", isDemo: isTest },
+              update: { passwordHash: hash!, role: "TEACHER", isDemo: isTest },
+              select: { id: true },
+            });
+            userId = user.id;
+            await tx.teacher.updateMany({ where: { userId, NOT: { id: tid } }, data: { userId: null } });
+            await tx.teacher.update({ where: { id: tid }, data: { userId } });
+          }
+          if (password) {
+            credentials.set(login, { login, fullName: t.fullName, email: t.email ?? "", role: ROLE_TEACHER, password });
+          }
+          if (isTest) testTeacher = { login, fullName: t.fullName };
+        }
+        // Аккаунты преподавателей, которых больше нет в расписании
+        await tx.user.deleteMany({ where: { role: "TEACHER", teacher: null } });
+
         // В файле остаются только логины, которые есть в базе
         const logins = new Set((await tx.user.findMany({ select: { login: true } })).map((u) => u.login));
         for (const login of [...credentials.keys()]) if (!logins.has(login)) credentials.delete(login);
@@ -543,6 +637,7 @@ export async function importUniversityData(
       group: s.academicGroup,
     })),
     teachers: data.teachers.length,
+    testTeacher,
     buildings: data.buildings.length,
     rooms: data.rooms.length,
     disciplines: data.disciplines.length,

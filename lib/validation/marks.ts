@@ -30,3 +30,6 @@ export const createMarkSchema = z.object({
 export type CreateMarkInput = z.infer<typeof createMarkSchema>;
 
 export const deleteMarkSchema = z.object({ markId: id });
+
+/** Ответ серверного действия формы оценок. */
+export type MarkFormState = { error?: string; success?: string; savedAt?: number } | undefined;

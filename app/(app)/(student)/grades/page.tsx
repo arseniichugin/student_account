@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ChartColumn } from "lucide-react";
 import { MarkBadge } from "@/components/marks/mark-badge";
+import { MarkSeen } from "@/components/mark-seen";
+import { NewTag } from "@/components/new-tag";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/states";
@@ -9,18 +11,25 @@ import { requireStudent } from "@/lib/auth/guards";
 import { getMyMarksOverview, type MarkItem, type MarksOverview } from "@/lib/data/marks";
 import { formatAverage, pluralMarks } from "@/lib/marks/stats";
 import { formatDayMonthLong, formatDayShort, formatWeekRange } from "@/lib/schedule/dates";
+import { markMarksSeenAction } from "./actions";
 
 export const metadata: Metadata = { title: "Оценки" };
 
 export default async function GradesPage() {
   const ctx = await requireStudent();
   const o = await getMyMarksOverview(ctx);
+  const newCount = o.newCount;
 
   return (
     <div className="space-y-5">
+      {/* Есть новые — отмечаем просмотр (кружок в меню пропадает), подсветка остаётся до следующего открытия */}
+      <MarkSeen action={markMarksSeenAction} pending={o.newCount > 0} />
       <div>
         <h1 className="text-[28px] leading-tight font-bold lg:text-[32px]">Оценки</h1>
         <p className="mt-1 text-muted">
+          <NewTag show={newCount > 0} className="font-medium text-primary">
+            Новых оценок: {newCount} ·{" "}
+          </NewTag>
           {o.semesterNo} семестр · {formatDayMonthLong(o.semesterFrom)} – {formatDayMonthLong(o.semesterTo)}
         </p>
       </div>
@@ -130,7 +139,15 @@ function MarkRow({ m }: { m: MarkItem }) {
     <li className="flex items-center gap-3 py-2.5">
       <MarkBadge value={m.value} />
       <div className="min-w-0">
-        <p className="font-medium break-words">{m.discipline}</p>
+        <p className="font-medium break-words">
+          {m.discipline}
+          <NewTag
+            show={m.isNew}
+            className="ml-2 rounded-full bg-primary px-2 py-0.5 align-middle text-xs font-semibold text-on-primary"
+          >
+            Новая
+          </NewTag>
+        </p>
         <p className="text-sm text-muted">
           {m.kind} · {m.start}
         </p>
