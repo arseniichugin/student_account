@@ -136,7 +136,7 @@ export function AnnouncementForm({
         {fieldError("body")}
       </div>
 
-      <fieldset className="min-w-0">
+      <fieldset className="group/aud min-w-0">
         <legend className="mb-1.5 block text-sm font-medium">Кому отправить</legend>
         <div className="flex flex-wrap gap-2">
           {(staff
@@ -169,8 +169,9 @@ export function AnnouncementForm({
           {audience === "myGroups" && "Студенты всех групп, у которых вы ведёте занятия."}
         </p>
 
-        {audience === "course" && (
-          <div className="mt-3">
+        {/* Курс и время отправки показываются через CSS (:has(:checked)) — и без JavaScript */}
+        {staff && (
+          <div className="mt-3 hidden group-has-[[value=course]:checked]/aud:block">
             <Label htmlFor={`${id}-course`}>Курс</Label>
             <Select
               id={`${id}-course`}
@@ -223,7 +224,7 @@ export function AnnouncementForm({
         )}
       </fieldset>
 
-      <fieldset className="min-w-0">
+      <fieldset className="group/when min-w-0">
         <legend className="mb-1.5 block text-sm font-medium">Когда отправить</legend>
         <div className="flex flex-wrap gap-2">
           <Chip name="when" value="now" checked={when === "now"} onChange={() => setWhen("now")}>
@@ -233,23 +234,21 @@ export function AnnouncementForm({
             Запланировать
           </Chip>
         </div>
-        {when === "later" && (
-          <div className="mt-3 max-w-xs">
-            <Label htmlFor={`${id}-sendAt`}>Дата и время (по Москве)</Label>
-            <Input
-              id={`${id}-sendAt`}
-              type="datetime-local"
-              name="sendAt"
-              value={sendAt}
-              min={minSendAt}
-              onChange={(e) => setSendAt(e.target.value)}
-              aria-invalid={!!err.sendAt}
-              aria-describedby={describedBy("sendAt")}
-            />
-            {fieldError("sendAt")}
-            <p className="mt-1 text-sm text-muted">До этого времени студенты сообщение не увидят; отправку можно отменить.</p>
-          </div>
-        )}
+        <div className="mt-3 hidden max-w-xs group-has-[[value=later]:checked]/when:block">
+          <Label htmlFor={`${id}-sendAt`}>Дата и время (по Москве)</Label>
+          <Input
+            id={`${id}-sendAt`}
+            type="datetime-local"
+            name="sendAt"
+            value={sendAt}
+            min={minSendAt}
+            onChange={(e) => setSendAt(e.target.value)}
+            aria-invalid={!!err.sendAt}
+            aria-describedby={describedBy("sendAt")}
+          />
+          {fieldError("sendAt")}
+          <p className="mt-1 text-sm text-muted">До этого времени студенты сообщение не увидят; отправку можно отменить.</p>
+        </div>
       </fieldset>
 
       {state?.error && <FormMessage type="error">{state.error}</FormMessage>}
@@ -283,7 +282,8 @@ function Chip({
         className={cn(
           "inline-flex min-h-11 cursor-pointer items-center rounded-full px-3.5 text-sm font-medium transition-colors",
           "peer-focus-visible:ring-2 peer-focus-visible:ring-primary/40",
-          checked ? "bg-primary text-on-primary" : "bg-surface-muted text-muted hover:text-text",
+          // Подсветка — по состоянию самой радиокнопки (CSS), а не React: работает и без JavaScript
+          "bg-surface-muted text-muted hover:text-text peer-checked:bg-primary peer-checked:text-on-primary",
         )}
       >
         {children}

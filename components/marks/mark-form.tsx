@@ -100,9 +100,9 @@ export function MarkForm({ emptyStudentText }: { emptyStudentText: string }) {
                   className={cn(
                     "flex min-h-11 cursor-pointer items-center justify-center rounded-xl border text-[17px] font-semibold tabular-nums transition-colors",
                     "peer-focus-visible:ring-2 peer-focus-visible:ring-primary/40",
-                    value === v
-                      ? "border-primary bg-primary text-on-primary"
-                      : "border-border bg-surface hover:bg-surface-muted",
+                    // подсветка по состоянию радиокнопки (CSS) — видна и без JavaScript
+                    "border-border bg-surface hover:bg-surface-muted",
+                    "peer-checked:border-primary peer-checked:bg-primary peer-checked:text-on-primary",
                   )}
                 >
                   {v}
