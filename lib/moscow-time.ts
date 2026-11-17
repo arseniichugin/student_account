@@ -23,6 +23,18 @@ export function moscowToday(now: Date = new Date()): string {
   return dateFmt.format(now);
 }
 
+const timeFmt = new Intl.DateTimeFormat("en-GB", {
+  timeZone: UNIVERSITY_TIME_ZONE,
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+/** Текущее время по Москве: «09:05». */
+export function moscowNowTime(now: Date = new Date()): string {
+  return timeFmt.format(now);
+}
+
 /** Проверяет строку «YYYY-MM-DD» и то, что такая дата существует в календаре. */
 export function isIsoDate(value: string): boolean {
   const m = ISO_DATE_RE.exec(value);

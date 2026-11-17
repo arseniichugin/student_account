@@ -146,6 +146,7 @@ model Student {
   /// Языковые группы (0–2), в порядке колонок «Языковая группа 1/2»
   languageGroups  StudentGroup[]
   grades          Grade[]
+  marks           Mark[]
   requests        Request[]
 
   @@index([facultyId])
@@ -173,6 +174,8 @@ model Staff {
   faculty   Faculty @relation(fields: [facultyId], references: [id], onDelete: Cascade)
   fullName  String
   position  String
+  /// Оценки на занятиях, которые выставил сотрудник
+  marks     Mark[]
 }
 
 // ─── Расписание (из schedule.csv и campus-map.json; при импорте заменяется целиком) ─
@@ -240,6 +243,7 @@ model Discipline {
   oid       String?
   lessons   Lesson[]
   grades    Grade[]
+  marks     Mark[]
   deadlines Deadline[]
 }
 
@@ -288,6 +292,7 @@ model Lesson {
   urlDescription String?
   status         LessonStatus  @default(NORMAL)
   groups         LessonGroup[]
+  marks          Mark[]
 
   @@index([date])
   @@index([teacherId, date])
@@ -339,6 +344,39 @@ model Grade {
   date         DateTime?
 
   @@index([studentId, semester])
+}
+
+/// Оценка на занятии (текущая успеваемость). На одном занятии у студента может быть
+/// сколько угодно оценок — или ни одной. Сейчас оценки выставляет деканат (/staff/marks).
+/// Импорт расписания пересоздаёт занятия: lessonId на время обнуляется (SetNull) и
+/// восстанавливается по lessonOid, а дата и дисциплина хранятся в самой оценке — оценки не теряются.
+model Mark {
+  id           String     @id @default(cuid())
+  studentId    String
+  student      Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  lessonId     String?
+  lesson       Lesson?    @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+  /// lessonOid занятия из schedule.csv — по нему импорт заново связывает оценку с занятием
+  lessonOid    String
+  disciplineId String
+  discipline   Discipline @relation(fields: [disciplineId], references: [id])
+  /// Дата занятия по Москве (копия из занятия — для выборок «за неделю», «за семестр»)
+  date         DateTime   @db.Date
+  /// Время начала занятия «10:30» (копия — для подписи, если занятие пропало из расписания)
+  startTime    String
+  /// Вид работы занятия: «Семинар», «Лекция»…
+  lessonKind   String
+  /// Оценка по пятибалльной шкале: 1–5
+  value        Int
+  /// Кто выставил (сотрудник деканата); null — демо-наполнение или сотрудник удалён
+  createdById  String?
+  createdBy    Staff?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt    DateTime   @default(now())
+
+  @@index([studentId, date])
+  @@index([lessonId])
+  @@index([lessonOid])
+  @@index([createdById, createdAt])
 }
 
 // ─── Заявки и справки ───────────────────────────────────────────────

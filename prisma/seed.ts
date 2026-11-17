@@ -10,7 +10,7 @@
  */
 import "dotenv/config";
 import type { GradeKind, NotificationType, RequestStatus } from "@/lib/generated/prisma/client";
-import { dbDateToIso, moscowDateTime } from "@/lib/moscow-time";
+import { dbDateToIso, isoDateToDb, moscowDateTime, moscowToday } from "@/lib/moscow-time";
 import { createPrismaClient } from "@/lib/prisma-client";
 import { formatDayMonthLong } from "@/lib/schedule/dates";
 
@@ -162,6 +162,7 @@ async function main() {
     db.announcement.deleteMany(),
     db.request.deleteMany(),
     db.grade.deleteMany(),
+    db.mark.deleteMany(),
     db.deadline.deleteMany(),
   ]);
 
@@ -247,6 +248,67 @@ async function main() {
     });
   }
   for (let i = 0; i < grades.length; i += 5000) await db.grade.createMany({ data: grades.slice(i, i + 5000) });
+
+  // ─── Оценки на занятиях ───────────────────────────────────────────
+  // Для каждого студента — по всем прошедшим (на день запуска seed, по Москве) неотменённым занятиям
+  // его групп: на занятии может быть 0, 1, 2 или 3 оценки. На семинарах оценок больше, на лекциях — редко.
+  // «Уровень» студента задаёт, какие оценки ему чаще ставят. Детерминировано для одного и того же дня запуска.
+  console.log("Оценки на занятиях…");
+  const today = moscowToday();
+  const pastLessons = await db.lesson.findMany({
+    where: { status: { not: "CANCELLED" }, date: { lte: isoDateToDb(today) } },
+    select: { id: true, oid: true, date: true, startTime: true, kind: true, disciplineId: true, groups: { select: { groupId: true } } },
+  });
+  const lessonsByGroup = new Map<string, typeof pastLessons>();
+  for (const l of pastLessons) {
+    for (const { groupId } of l.groups) lessonsByGroup.set(groupId, [...(lessonsByGroup.get(groupId) ?? []), l]);
+  }
+  // Веса оценок 5/4/3/2 для «сильного», «среднего» и «слабого» студента
+  const LEVELS = [
+    [5, 5, 5, 5, 4, 4, 4, 3],
+    [5, 5, 4, 4, 4, 4, 3, 3, 2],
+    [5, 4, 4, 3, 3, 3, 3, 2, 2],
+  ] as const;
+  const marks: {
+    studentId: string;
+    lessonId: string;
+    lessonOid: string;
+    disciplineId: string;
+    date: Date;
+    startTime: string;
+    lessonKind: string;
+    value: number;
+    createdById: null;
+  }[] = [];
+  for (const s of students) {
+    const level = LEVELS[debtors.has(s.id) ? 2 : hash(`level:${s.externalId}`) % 3]!;
+    const seen = new Set<string>();
+    for (const groupId of [s.academicGroupId, ...s.languageGroups.map((g) => g.groupId)]) {
+      for (const l of lessonsByGroup.get(groupId) ?? []) {
+        if (seen.has(l.id)) continue;
+        seen.add(l.id);
+        const rand = rng(`mark:${s.externalId}:${l.oid}`);
+        const lecture = /лекц/i.test(l.kind);
+        const r = rand();
+        const count = lecture ? (r < 0.93 ? 0 : 1) : r < 0.5 ? 0 : r < 0.85 ? 1 : r < 0.97 ? 2 : 3;
+        for (let k = 0; k < count; k++) {
+          marks.push({
+            studentId: s.id,
+            lessonId: l.id,
+            lessonOid: l.oid,
+            disciplineId: l.disciplineId,
+            date: l.date,
+            startTime: l.startTime,
+            lessonKind: l.kind,
+            value: pick(rand, level),
+            // null — демо-наполнение: в «Последних выставленных» у деканата видны только оценки, введённые через форму
+            createdById: null,
+          });
+        }
+      }
+    }
+  }
+  for (let i = 0; i < marks.length; i += 5000) await db.mark.createMany({ data: marks.slice(i, i + 5000) });
 
   // ─── Заявки ───────────────────────────────────────────────────────
   console.log("Заявки…");
@@ -543,7 +605,7 @@ async function main() {
   await db.notification.createMany({ data: notifications });
 
   console.log(
-    `\nГотово: оценок ${grades.length}, заявок ${createdRequests.length}, дедлайнов ${deadlines.length}, ` +
+    `\nГотово: оценок в ведомостях ${grades.length}, оценок на занятиях ${marks.length}, заявок ${createdRequests.length}, дедлайнов ${deadlines.length}, ` +
       `объявлений ${announcements.length}, уведомлений ${notifications.length}.`,
   );
   console.log(`Тестовые студенты: ${testStudents.map((s) => s.user.login).join(", ") || "нет (запустите npm run data:import)"}`);

@@ -381,6 +381,20 @@ export async function importUniversityData(
         for (const part of chunks(lessonRows, 2000)) await tx.lesson.createMany({ data: part });
         for (const part of chunks(lessonGroupRows, 5000)) await tx.lessonGroup.createMany({ data: part });
         counts.lessonGroups = lessonGroupRows.length;
+        // Оценки на занятиях: старые занятия удалены (lessonId обнулился) — связываем заново по lessonOid.
+        // Если занятия больше нет в расписании, оценка остаётся с датой и дисциплиной, но без занятия.
+        // Связываем, только если у занятия те же дата и дисциплина и в нём по-прежнему есть группа студента.
+        await tx.$executeRaw`
+          UPDATE "Mark" AS m SET "lessonId" = l."id"
+          FROM "Lesson" AS l, "Student" AS s
+          WHERE m."lessonId" IS NULL AND m."lessonOid" = l."oid" AND s."id" = m."studentId"
+            AND l."date" = m."date" AND l."disciplineId" = m."disciplineId"
+            AND EXISTS (
+              SELECT 1 FROM "LessonGroup" AS lg
+              WHERE lg."lessonId" = l."id"
+                AND (lg."groupId" = s."academicGroupId"
+                  OR lg."groupId" IN (SELECT sg."groupId" FROM "StudentGroup" AS sg WHERE sg."studentId" = s."id"))
+            )`;
 
         // Студенты
         log("Студенты и аккаунты…");
@@ -475,7 +489,7 @@ export async function importUniversityData(
         await tx.user.deleteMany({ where: { role: "STAFF", staff: { faculty: { code: { notIn: facultyCodes } } } } });
         await tx.faculty.deleteMany({ where: { code: { notIn: facultyCodes } } });
         await tx.program.deleteMany({ where: { students: { none: {} } } });
-        await tx.discipline.deleteMany({ where: { lessons: { none: {} }, grades: { none: {} }, deadlines: { none: {} } } });
+        await tx.discipline.deleteMany({ where: { lessons: { none: {} }, grades: { none: {} }, marks: { none: {} }, deadlines: { none: {} } } });
 
         // Деканаты: по одному сотруднику на факультет, пароль — DEMO_PASSWORD
         for (const [i, f] of data.faculties.entries()) {
