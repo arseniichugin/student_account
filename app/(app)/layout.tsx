@@ -1,5 +1,6 @@
-import { AppShell, type ShellUser } from "@/components/app-shell";
+import { AppShell, type ShellNotifications, type ShellUser } from "@/components/app-shell";
 import { requireStaff, requireStudent, requireUser } from "@/lib/auth/guards";
+import { countMyUnreadNotifications } from "@/lib/data/notifications";
 import { getMyStaffProfile, getMyStudentProfile } from "@/lib/data/profile";
 import { HOME, NAV } from "@/lib/navigation";
 
@@ -11,9 +12,12 @@ import { HOME, NAV } from "@/lib/navigation";
 export default async function AppLayout({ children }: LayoutProps<"/">) {
   const { role } = await requireUser();
   const user = role === "STUDENT" ? await studentShellUser() : await staffShellUser();
+  // Колокольчик — только у студента: уведомления получают студенты, отправляет деканат
+  const notifications: ShellNotifications | undefined =
+    role === "STUDENT" ? { href: "/notifications", unread: await countMyUnreadNotifications(await requireStudent()) } : undefined;
 
   return (
-    <AppShell nav={NAV[role]} homeHref={HOME[role]} user={user}>
+    <AppShell nav={NAV[role]} homeHref={HOME[role]} user={user} notifications={notifications}>
       {children}
     </AppShell>
   );

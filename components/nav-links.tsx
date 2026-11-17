@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, ChartColumn, FileText, Inbox, MapPinned, NotebookPen, Sun, UserRound } from "lucide-react";
+import { Bell, CalendarDays, ChartColumn, FileText, Inbox, MapPinned, NotebookPen, Sun, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { activeNavHref, type NavIcon, type NavItem } from "@/lib/navigation";
@@ -16,6 +16,7 @@ const ICONS: Record<NavIcon, typeof Sun> = {
   inbox: Inbox,
   chart: ChartColumn,
   pen: NotebookPen,
+  bell: Bell,
 };
 
 const STYLES = {
@@ -45,7 +46,7 @@ export function NavLinks({ items, variant }: { items: NavItem[]; variant: keyof 
 
   return (
     <ul className={s.list}>
-      {items.map(({ href, label, icon }) => {
+      {items.map(({ href, label, icon, badge }) => {
         const Icon = ICONS[icon];
         const active = href === activeHref;
         return (
@@ -57,6 +58,12 @@ export function NavLinks({ items, variant }: { items: NavItem[]; variant: keyof 
             >
               <Icon className={s.icon} aria-hidden />
               <span className="max-w-full truncate">{label}</span>
+              {badge ? (
+                <span className="ml-auto min-w-6 rounded-full bg-primary px-1.5 text-center text-xs leading-6 font-semibold text-on-primary">
+                  {badge > 99 ? "99+" : badge}
+                  <span className="sr-only"> непрочитанных</span>
+                </span>
+              ) : null}
             </Link>
           </li>
         );

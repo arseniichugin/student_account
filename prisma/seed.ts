@@ -487,6 +487,7 @@ async function main() {
     facultyId?: string | null;
     course?: number | null;
     publishedAt: Date;
+    kind?: NotificationType;
   };
   const announcements: AnnouncementSeed[] = [];
   for (const f of faculties) {
@@ -502,6 +503,7 @@ async function main() {
         : "Расписание экзаменов появится в кабинете за месяц до начала сессии.",
       facultyId: f.id,
       publishedAt: msk(2026, 11, 6, 12, 0),
+      kind: "EXAM",
     });
     if (courses[0] !== undefined) {
       announcements.push({
@@ -536,7 +538,12 @@ async function main() {
       publishedAt: msk(2026, 11, 7, 9, 0),
     });
   }
-  await db.announcement.createMany({ data: announcements });
+  // Создаём по одному, чтобы знать id: уведомления получателей ссылаются на событие
+  const createdAnnouncements: (AnnouncementSeed & { id: string })[] = [];
+  for (const a of announcements) {
+    const { id } = await db.announcement.create({ data: { ...a, createdAt: a.publishedAt }, select: { id: true } });
+    createdAnnouncements.push({ ...a, id });
+  }
 
   // ─── Уведомления ──────────────────────────────────────────────────
   console.log("Уведомления…");
@@ -548,6 +555,7 @@ async function main() {
     link?: string | null;
     createdAt: Date;
     readAt?: Date | null;
+    announcementId?: string | null;
   };
   const notifications: NotificationSeed[] = [];
   const studentById = new Map(students.map((s) => [s.id, s]));
@@ -597,12 +605,27 @@ async function main() {
         createdAt: msk(2026, 11, 8, 18, 0),
       });
     }
-    const ann = announcements.find((a) => a.facultyId === s.facultyId && (a.course == null || a.course === s.course));
-    if (ann) {
-      notifications.push({ userId: s.userId, type: "ANNOUNCEMENT", title: ann.title, body: ann.body, createdAt: ann.publishedAt });
+  }
+  // События деканатов — каждому получателю (как при отправке из кабинета деканата).
+  // Часть уже прочитана; у тестовых студентов — не прочитаны, чтобы на колокольчике было число.
+  const testIds = new Set(testStudents.map((s) => s.id));
+  for (const a of createdAnnouncements) {
+    for (const s of students) {
+      if (a.facultyId && a.facultyId !== s.facultyId) continue;
+      if (a.course != null && a.course !== s.course) continue;
+      const read = !testIds.has(s.id) && rng(`read:${a.id}:${s.externalId}`)() < 0.6;
+      notifications.push({
+        userId: s.userId,
+        type: a.kind ?? "ANNOUNCEMENT",
+        title: a.title,
+        body: a.body,
+        createdAt: a.publishedAt,
+        readAt: read ? new Date(a.publishedAt.getTime() + 86_400_000) : null,
+        announcementId: a.id,
+      });
     }
   }
-  await db.notification.createMany({ data: notifications });
+  for (let i = 0; i < notifications.length; i += 5000) await db.notification.createMany({ data: notifications.slice(i, i + 5000) });
 
   console.log(
     `\nГотово: оценок в ведомостях ${grades.length}, оценок на занятиях ${marks.length}, заявок ${createdRequests.length}, дедлайнов ${deadlines.length}, ` +

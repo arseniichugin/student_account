@@ -418,40 +418,57 @@ model Request {
 
 // ─── Объявления и уведомления ───────────────────────────────────────
 
+/// Событие деканата: сообщение, дата экзамена, срок сдачи… Создаёт только деканат (/staff/notifications).
+/// При создании каждому получателю создаётся уведомление (Notification) — студент видит его,
+/// когда наступит publishedAt (отложенная отправка без фоновых задач).
 model Announcement {
-  id          String   @id @default(cuid())
-  authorId    String
-  author      User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  title       String
-  body        String
+  id            String           @id @default(cuid())
+  authorId      String
+  author        User             @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  /// Вид события — он же тип уведомлений получателей
+  kind          NotificationType @default(ANNOUNCEMENT)
+  title         String
+  body          String
   /// Аудитория: если поля пустые — для всех. Иначе — только для факультета / курса / группы.
-  facultyId   String?
-  faculty     Faculty? @relation(fields: [facultyId], references: [id], onDelete: Cascade)
-  course      Int?
-  groupId     String?
-  group       Group?   @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  publishedAt DateTime @default(now())
+  facultyId     String?
+  faculty       Faculty?         @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+  course        Int?
+  groupId       String?
+  group         Group?           @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  /// Время отправки: студенты увидят уведомление начиная с этого момента
+  publishedAt   DateTime         @default(now())
+  createdAt     DateTime         @default(now())
+  notifications Notification[]
 
   @@index([publishedAt])
+  @@index([facultyId, publishedAt])
 }
 
 enum NotificationType {
+  /// Сообщение деканата
   ANNOUNCEMENT
   SCHEDULE_CHANGE
   REQUEST_STATUS
   DEADLINE
+  /// Экзамен, зачёт
+  EXAM
 }
 
 model Notification {
-  id        String           @id @default(cuid())
-  userId    String
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type      NotificationType
-  title     String
-  body      String
-  link      String?
-  readAt    DateTime?
-  createdAt DateTime         @default(now())
+  id             String           @id @default(cuid())
+  userId         String
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type           NotificationType
+  title          String
+  body           String
+  link           String?
+  readAt         DateTime?
+  /// Момент, с которого уведомление видно получателю (у отложенных событий — в будущем)
+  createdAt      DateTime         @default(now())
+  /// Событие деканата, из которого создано уведомление (отмена события удаляет уведомления)
+  announcementId String?
+  announcement   Announcement?    @relation(fields: [announcementId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+  @@index([announcementId])
 }

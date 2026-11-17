@@ -34,6 +34,8 @@ export function Combobox({
   disabledHint,
   emptyText = "Ничего не найдено",
   inputMode,
+  invalid,
+  errorId,
 }: {
   label: string;
   name: string;
@@ -46,6 +48,9 @@ export function Combobox({
   disabledHint?: string;
   emptyText?: string;
   inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
+  /** Ошибка проверки на сервере: поле помечается aria-invalid и ссылается на текст ошибки errorId */
+  invalid?: boolean;
+  errorId?: string;
 }) {
   const id = useId();
   const listId = `${id}-list`;
@@ -142,7 +147,8 @@ export function Combobox({
           aria-controls={listId}
           aria-autocomplete="list"
           aria-activedescendant={showList && active >= 0 ? `${id}-opt-${active}` : undefined}
-          aria-describedby={`${id}-status`}
+          aria-describedby={[`${id}-status`, invalid ? errorId : null].filter(Boolean).join(" ")}
+          aria-invalid={invalid || undefined}
           autoComplete="off"
           inputMode={inputMode}
           disabled={disabled}
