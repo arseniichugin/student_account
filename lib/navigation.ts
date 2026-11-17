@@ -37,7 +37,7 @@ export const NAV: Record<NavRole, NavItem[]> = {
   // Преподаватель: без заявок и справок. Входящие уведомления — колокольчик в шапке (/notifications).
   TEACHER: [
     { href: "/schedule", label: "Расписание", icon: "calendar" },
-    { href: "/teacher/marks", label: "Оценки", icon: "pen" },
+    { href: "/teacher/marks", label: "Журнал", icon: "pen" },
     { href: "/teacher/notifications", label: "Рассылка", icon: "send" },
     { href: "/map", label: "Карта", icon: "map" },
   ],

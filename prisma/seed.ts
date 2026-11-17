@@ -163,6 +163,7 @@ async function main() {
     db.request.deleteMany(),
     db.grade.deleteMany(),
     db.mark.deleteMany(),
+    db.attendance.deleteMany(),
     db.deadline.deleteMany(),
   ]);
 
@@ -293,6 +294,15 @@ async function main() {
     teacherId: string | null;
     createdAt: Date;
   }[] = [];
+  const attendance: {
+    studentId: string;
+    lessonId: string;
+    lessonOid: string;
+    date: Date;
+    status: "PRESENT" | "LATE" | "ABSENT";
+    teacherId: string | null;
+    updatedAt: Date;
+  }[] = [];
   for (const s of students) {
     const level = LEVELS[debtors.has(s.id) ? 2 : hash(`level:${s.externalId}`) % 3]!;
     const seen = new Set<string>();
@@ -306,6 +316,20 @@ async function main() {
         const lecture = /лекц/i.test(l.kind);
         const r = rand();
         const count = lecture ? (r < 0.93 ? 0 : 1) : r < 0.5 ? 0 : r < 0.85 ? 1 : r < 0.97 ? 2 : 3;
+        // Посещаемость: с оценкой — был (иногда опоздал); без оценки — чаще был, иногда не был.
+        // Студенты с долгом пропускают чаще.
+        const a = rand();
+        const absentShare = debtors.has(s.id) ? 0.25 : 0.08;
+        attendance.push({
+          studentId: s.id,
+          lessonId: l.id,
+          lessonOid: l.oid,
+          date: l.date,
+          status: count > 0 ? (a < 0.05 ? "LATE" : "PRESENT") : a < absentShare ? "ABSENT" : a < absentShare + 0.05 ? "LATE" : "PRESENT",
+          teacherId: l.teacherId,
+          // «Отмечено» после занятия, а не в момент запуска seed (иначе срабатывал бы лимит отметок в час)
+          updatedAt: moscowDateTime(dbDateToIso(l.date), l.endTime),
+        });
         for (let k = 0; k < count; k++) {
           marks.push({
             studentId: s.id,
@@ -328,6 +352,7 @@ async function main() {
     }
   }
   for (let i = 0; i < marks.length; i += 5000) await db.mark.createMany({ data: marks.slice(i, i + 5000) });
+  for (let i = 0; i < attendance.length; i += 5000) await db.attendance.createMany({ data: attendance.slice(i, i + 5000) });
   // «Последний раз открывали оценки» — двое суток назад: оценки за эти дни видны как новые
   await db.student.updateMany({ data: { marksSeenAt: new Date(Date.now() - 2 * 86_400_000) } });
 
@@ -706,7 +731,7 @@ async function main() {
   for (let i = 0; i < notifications.length; i += 5000) await db.notification.createMany({ data: notifications.slice(i, i + 5000) });
 
   console.log(
-    `\nГотово: оценок в ведомостях ${grades.length}, оценок на занятиях ${marks.length}, заявок ${createdRequests.length}, дедлайнов ${deadlines.length}, ` +
+    `\nГотово: оценок в ведомостях ${grades.length}, оценок на занятиях ${marks.length}, отметок посещаемости ${attendance.length}, заявок ${createdRequests.length}, дедлайнов ${deadlines.length}, ` +
       `объявлений ${announcements.length}, уведомлений ${notifications.length}.`,
   );
   console.log(`Тестовые студенты: ${testStudents.map((s) => s.user.login).join(", ") || "нет (запустите npm run data:import)"}`);

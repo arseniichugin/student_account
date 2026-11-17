@@ -10,13 +10,13 @@ const TONE: Record<number, string> = {
 };
 
 /** Оценка 1–5 в цветном квадрате. */
-export function MarkBadge({ value, size = "md", title }: { value: number; size?: "sm" | "md"; title?: string }) {
+export function MarkBadge({ value, size = "md", title }: { value: number; size?: "xs" | "sm" | "md"; title?: string }) {
   return (
     <span
       title={title}
       className={cn(
         "inline-flex shrink-0 items-center justify-center rounded-lg font-semibold tabular-nums",
-        size === "md" ? "size-9 text-[17px]" : "size-7 text-sm",
+        size === "md" ? "size-9 text-[17px]" : size === "sm" ? "size-7 text-sm" : "size-6 rounded-md text-[13px]",
         TONE[value] ?? "bg-surface-muted text-text",
       )}
     >

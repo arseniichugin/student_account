@@ -521,6 +521,17 @@ export async function importUniversityData(
                 AND (lg."groupId" = s."academicGroupId"
                   OR lg."groupId" IN (SELECT sg."groupId" FROM "StudentGroup" AS sg WHERE sg."studentId" = s."id"))
             )`;
+        // Посещаемость — так же: по lessonOid, если у занятия та же дата и в нём есть группа студента
+        await tx.$executeRaw`
+          UPDATE "Attendance" AS a SET "lessonId" = l."id"
+          FROM "Lesson" AS l, "Student" AS s
+          WHERE a."lessonId" IS NULL AND a."lessonOid" = l."oid" AND s."id" = a."studentId" AND l."date" = a."date"
+            AND EXISTS (
+              SELECT 1 FROM "LessonGroup" AS lg
+              WHERE lg."lessonId" = l."id"
+                AND (lg."groupId" = s."academicGroupId"
+                  OR lg."groupId" IN (SELECT sg."groupId" FROM "StudentGroup" AS sg WHERE sg."studentId" = s."id"))
+            )`;
 
         // Студенты
         log("Студенты и аккаунты…");
