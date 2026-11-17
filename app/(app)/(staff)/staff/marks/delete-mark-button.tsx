@@ -1,0 +1,28 @@
+"use client";
+
+import { useTransition } from "react";
+import { Loader2, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { deleteMarkAction } from "./actions";
+
+/** Удаление оценки — только после подтверждения: одно случайное касание не должно стирать оценку. */
+export function DeleteMarkButton({ markId, label }: { markId: string; label: string }) {
+  const [pending, startTransition] = useTransition();
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      disabled={pending}
+      aria-label={`Удалить ${label}`}
+      onClick={() => {
+        if (!window.confirm(`Удалить ${label}?`)) return;
+        const formData = new FormData();
+        formData.set("markId", markId);
+        startTransition(() => deleteMarkAction(formData));
+      }}
+    >
+      {pending ? <Loader2 className="size-5 animate-spin" aria-hidden /> : <Trash2 className="size-5" aria-hidden />}
+    </Button>
+  );
+}

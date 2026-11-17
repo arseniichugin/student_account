@@ -88,6 +88,9 @@ LessonGroup     lessonId, groupId, date — лекция потока = одно
 
 ── демо-контент (prisma/seed.ts) и действия пользователей ──
 Grade           id, studentId, disciplineId, semester, kind (EXAM | CREDIT | COURSEWORK | MIDTERM), value?, date?
+Mark            id, studentId, lessonId? (SetNull), lessonOid, disciplineId, date, startTime, lessonKind,
+                value (1–5), createdById? → Staff, createdAt — оценка на занятии, их 0…N на занятие
+                (подробно — docs/MARKS.md); импорт восстанавливает lessonId по lessonOid
 Deadline        id, groupId, disciplineId?, title, dueAt
 RequestType     id, code, name, description, etaDays
 Request         id, studentId, typeId, payload (JSON),
