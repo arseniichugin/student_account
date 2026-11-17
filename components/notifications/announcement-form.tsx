@@ -12,29 +12,41 @@ import {
 } from "@/lib/notifications/labels";
 import { cn } from "@/lib/utils";
 import { ANNOUNCEMENT_BODY_MAX, ANNOUNCEMENT_TITLE_MAX } from "@/lib/validation/notifications";
-import { createAnnouncementAction } from "./actions";
+import { createStaffAnnouncementAction, createTeacherAnnouncementAction } from "@/lib/notifications/form-actions";
 
 /**
- * Новое событие: вид, название, текст, кому, когда.
+ * Новое событие: вид, название, текст, кому, когда. Общая форма деканата (mode="staff")
+ * и преподавателя (mode="teacher") — отличаются только варианты «Кому отправить».
  * Отправляется через onSubmit + startTransition (а не <form action>): иначе React 19 после отправки
  * сбрасывает все поля, в том числе выбранную аудиторию. После успеха очищаются только название и текст.
  */
 export function AnnouncementForm({
-  facultyStudents,
-  courses,
+  mode,
+  students,
+  teachers = 0,
+  courses = [],
   minSendAt,
 }: {
-  facultyStudents: number;
-  courses: { course: number; students: number }[];
+  mode: "staff" | "teacher";
+  /** Деканат: студентов факультета; преподаватель: студентов во всех его группах */
+  students: number;
+  /** Деканат: преподавателей, ведущих занятия у факультета */
+  teachers?: number;
+  courses?: { course: number; students: number }[];
   /** «YYYY-MM-DDTHH:MM» — сейчас по Москве (нижняя граница поля времени) */
   minSendAt: string;
 }) {
   const id = useId();
-  const [state, formAction, pending] = useActionState(createAnnouncementAction, undefined);
+  const staff = mode === "staff";
+  const [state, formAction, pending] = useActionState(
+    staff ? createStaffAnnouncementAction : createTeacherAnnouncementAction,
+    undefined,
+  );
   const [kind, setKind] = useState<StaffNotificationKind>("ANNOUNCEMENT");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-  const [audience, setAudience] = useState<AudienceType>("faculty");
+  const [audience, setAudience] = useState<AudienceType>(staff ? "faculty" : "myGroups");
+  const [teacher, setTeacher] = useState<ComboboxItem | null>(null);
   const [course, setCourse] = useState(String(courses[0]?.course ?? ""));
   const [group, setGroup] = useState<ComboboxItem | null>(null);
   const [when, setWhen] = useState<"now" | "later">("now");
@@ -125,20 +137,34 @@ export function AnnouncementForm({
       <fieldset className="min-w-0">
         <legend className="mb-1.5 block text-sm font-medium">Кому отправить</legend>
         <div className="flex flex-wrap gap-2">
-          <Chip name="audience" value="faculty" checked={audience === "faculty"} onChange={() => setAudience("faculty")}>
-            Отправить всем ({facultyStudents})
-          </Chip>
-          <Chip name="audience" value="course" checked={audience === "course"} onChange={() => setAudience("course")}>
-            Отправить курсу…
-          </Chip>
-          <Chip name="audience" value="group" checked={audience === "group"} onChange={() => setAudience("group")}>
-            Отправить группе…
-          </Chip>
+          {(staff
+            ? ([
+                ["faculty", `Отправить всем (${students})`],
+                ["course", "Отправить курсу…"],
+                ["group", "Отправить группе…"],
+                ["allTeachers", `Всем преподавателям (${teachers})`],
+                ["teacher", "Преподавателю…"],
+              ] as const)
+            : ([
+                ["myGroups", `Всем моим группам (${students})`],
+                ["group", "Отправить группе…"],
+              ] as const)
+          ).map(([value, label]) => (
+            <Chip key={value} name="audience" value={value} checked={audience === value} onChange={() => setAudience(value)}>
+              {label}
+            </Chip>
+          ))}
         </div>
         <p className="mt-1.5 text-sm text-muted">
           {audience === "faculty" && "Все студенты вашего факультета."}
           {audience === "course" && "Все студенты выбранного курса вашего факультета."}
-          {audience === "group" && "Студенты академической или языковой группы вашего факультета."}
+          {audience === "group" &&
+            (staff
+              ? "Студенты академической или языковой группы вашего факультета."
+              : "Студенты одной из групп, у которых вы ведёте занятия.")}
+          {audience === "allTeachers" && "Все преподаватели, которые ведут занятия у групп вашего факультета."}
+          {audience === "teacher" && "Один преподаватель из ведущих занятия у вашего факультета."}
+          {audience === "myGroups" && "Студенты всех групп, у которых вы ведёте занятия."}
         </p>
 
         {audience === "course" && (
@@ -167,14 +193,30 @@ export function AnnouncementForm({
               label="Группа"
               name="groupId"
               placeholder="Например: 1-ГР-1"
-              url={(q) => `/api/staff/notifications/groups?${new URLSearchParams({ q })}`}
+              url={(q) => `${staff ? "/api/staff/notifications/groups" : "/api/teacher/groups"}?${new URLSearchParams({ q })}`}
               value={group}
               onChange={setGroup}
-              emptyText="На вашем факультете такой группы нет"
+              emptyText={staff ? "На вашем факультете такой группы нет" : "Среди ваших групп такой нет"}
               invalid={!!err.groupId}
               errorId={`${id}-groupId-error`}
             />
             {fieldError("groupId")}
+          </div>
+        )}
+        {audience === "teacher" && (
+          <div className="mt-3">
+            <Combobox
+              label="Преподаватель"
+              name="teacherId"
+              placeholder="Фамилия преподавателя"
+              url={(q) => `/api/staff/notifications/teachers?${new URLSearchParams({ q })}`}
+              value={teacher}
+              onChange={setTeacher}
+              emptyText="Такой преподаватель не ведёт занятия у вашего факультета"
+              invalid={!!err.teacherId}
+              errorId={`${id}-teacherId-error`}
+            />
+            {fieldError("teacherId")}
           </div>
         )}
       </fieldset>

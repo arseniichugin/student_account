@@ -77,6 +77,16 @@ export type StudentData = {
   languageGroups: string[];
 };
 export type TeacherData = { oid: string; shortName: string; fullName: string; rank: string | null; email: string | null };
+
+/**
+ * Логин преподавателя: часть почты до «@» («p.arseneva@…» → «p.arseneva»),
+ * без почты — транслит краткого ФИО («Арсеньева П.Н.» → «arseneva-p-n»). Уникальность — в импорте.
+ */
+export function teacherLogin(t: Pick<TeacherData, "email" | "shortName" | "oid">): string {
+  const local = t.email?.split("@")[0]?.toLowerCase() ?? "";
+  if (/^[a-z0-9][a-z0-9._-]{1,40}$/.test(local)) return local;
+  return translit(t.shortName) || `teacher-${t.oid}`;
+}
 export type BuildingData = {
   key: string;
   name: string;

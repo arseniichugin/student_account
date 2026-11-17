@@ -5,10 +5,13 @@ import { StatusBadge } from "@/components/status-badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/states";
+import { MarkSeen } from "@/components/mark-seen";
+import { NewTag } from "@/components/new-tag";
 import { requireStudent } from "@/lib/auth/guards";
 import { listMyRequests } from "@/lib/data/requests";
 import type { RequestStatus } from "@/lib/generated/prisma/enums";
 import { formatDate } from "@/lib/utils";
+import { markRequestsSeenAction } from "./actions";
 
 export const metadata: Metadata = { title: "Заявки и справки" };
 
@@ -23,9 +26,11 @@ const STATUS_HELP: [RequestStatus, string][] = [
 export default async function RequestsPage() {
   const ctx = await requireStudent();
   const requests = await listMyRequests(ctx);
+  const changed = requests.filter((r) => !r.statusSeen).length;
 
   return (
     <div className="space-y-5">
+      <MarkSeen action={markRequestsSeenAction} pending={changed > 0} />
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-[28px] leading-tight font-bold lg:text-[32px]">Заявки</h1>
         <Link href="/requests/new" className={buttonVariants()}>
@@ -67,6 +72,9 @@ export default async function RequestsPage() {
                   >
                     <span className="min-w-0 flex-1">
                       <span className="block text-[15px] font-medium @xl:truncate">{r.type.name}</span>
+                      <NewTag show={!r.statusSeen} className="block text-xs font-semibold text-primary">
+                        Статус изменился
+                      </NewTag>
                       <span className="block text-xs text-muted @xl:hidden">от {formatDate(r.createdAt)}</span>
                     </span>
                     <span className="hidden text-sm text-muted @xl:block">{formatDate(r.createdAt)}</span>

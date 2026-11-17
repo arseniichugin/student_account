@@ -2,13 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Bell, CalendarClock, Clock, FileText, GraduationCap, Megaphone, type LucideIcon } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/states";
-import { requireStudent } from "@/lib/auth/guards";
+import { requireRecipient } from "@/lib/auth/guards";
 import { listMyNotifications } from "@/lib/data/notifications";
 import type { NotificationType } from "@/lib/generated/prisma/enums";
 import { NOTIFICATION_KIND_LABEL } from "@/lib/notifications/labels";
 import { cn, formatDateTime } from "@/lib/utils";
+import { NewHighlight, NewTag } from "@/components/new-tag";
 import { MarkRead } from "./mark-read";
 
 export const metadata: Metadata = { title: "Уведомления" };
@@ -36,7 +36,8 @@ function isInternalPath(link: string): boolean {
 }
 
 export default async function NotificationsPage() {
-  const ctx = await requireStudent();
+  // Студент или преподаватель; сотрудника деканата — в его кабинет
+  const ctx = await requireRecipient();
   const items = await listMyNotifications(ctx);
   const unread = items.filter((n) => !n.read).length;
 
@@ -44,7 +45,10 @@ export default async function NotificationsPage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-[28px] leading-tight font-bold lg:text-[32px]">Уведомления</h1>
-        <p className="mt-1 text-muted">{unread > 0 ? `Новых: ${unread}` : "Новых нет"}</p>
+        <p className="mt-1 text-muted">
+          <NewTag show={unread > 0}>Новых: {unread}</NewTag>
+          <NewTag show={unread === 0}>Новых нет</NewTag>
+        </p>
       </div>
       <MarkRead unread={unread} />
 
@@ -53,19 +57,25 @@ export default async function NotificationsPage() {
           icon={Bell}
           title="Уведомлений пока нет"
           action={
-            <Link href="/today" className={buttonVariants({ variant: "secondary" })}>
+            <Link href={ctx.role === "TEACHER" ? "/schedule" : "/today"} className={buttonVariants({ variant: "secondary" })}>
               На главную
             </Link>
           }
         >
-          Здесь появятся сообщения деканата, даты экзаменов, сроки сдачи и изменения статуса заявок.
+          {ctx.role === "TEACHER"
+            ? "Здесь появятся сообщения деканатов."
+            : "Здесь появятся сообщения деканата и преподавателей, даты экзаменов, сроки сдачи и изменения статуса заявок."}
         </EmptyState>
       ) : (
         <ul className="space-y-3">
           {items.map((n) => {
             const Icon = ICON[n.type];
             const content = (
-              <Card className={cn("flex gap-3", !n.read && "border-primary bg-primary-soft")}>
+              <NewHighlight
+                show={!n.read}
+                className="flex gap-3 rounded-card border border-border bg-surface p-4 sm:p-5"
+                newClassName="border-primary bg-primary-soft"
+              >
                 <span
                   className={cn("flex size-10 shrink-0 items-center justify-center rounded-full", ICON_TONE[n.type])}
                   aria-hidden
@@ -75,16 +85,22 @@ export default async function NotificationsPage() {
                 <div className="min-w-0 flex-1">
                   <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted">
                     <span>{NOTIFICATION_KIND_LABEL[n.type]}</span>
+                    {n.from && (
+                      <>
+                        <span aria-hidden>·</span>
+                        <span>{n.from}</span>
+                      </>
+                    )}
                     <span aria-hidden>·</span>
                     <time dateTime={n.createdAt.toISOString()}>{formatDateTime(n.createdAt)}</time>
-                    {!n.read && (
-                      <span className="rounded-full bg-primary px-2 py-0.5 font-semibold text-on-primary">Новое</span>
-                    )}
+                    <NewTag show={!n.read} className="rounded-full bg-primary px-2 py-0.5 font-semibold text-on-primary">
+                      Новое
+                    </NewTag>
                   </p>
                   <h2 className="mt-0.5 font-semibold break-words">{n.title}</h2>
                   <p className="mt-1 text-sm break-words whitespace-pre-line">{n.body}</p>
                 </div>
-              </Card>
+              </NewHighlight>
             );
             return (
               <li key={n.id}>

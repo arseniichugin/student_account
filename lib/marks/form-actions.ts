@@ -1,16 +1,28 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireStaff } from "@/lib/auth/guards";
-import { createFacultyMark, deleteFacultyMark } from "@/lib/data/marks";
+import { redirect } from "next/navigation";
+import { getStaffContext, getTeacherContext } from "@/lib/auth/guards";
+import { createMark, deleteMark, type Grader } from "@/lib/data/marks";
 import { formatDayMonthLong } from "@/lib/schedule/dates";
-import { createMarkSchema, deleteMarkSchema } from "@/lib/validation/marks";
+import { createMarkSchema, deleteMarkSchema, type MarkFormState } from "@/lib/validation/marks";
 
-export type MarkFormState = { error?: string; success?: string; savedAt?: number } | undefined;
+// Серверные действия формы оценок — общие для деканата (/staff/marks) и преподавателя (/teacher/marks).
+// Кто ставит, определяется только по сессии; права (свой факультет / свои занятия) — в lib/data/marks.ts.
 
-/** Выставить оценку. Все проверки (свой факультет, занятие студента, дата не в будущем) — в lib/data/marks.ts. */
+async function requireGrader(): Promise<Grader> {
+  const ctx = (await getStaffContext()) ?? (await getTeacherContext());
+  if (!ctx) redirect("/login");
+  return ctx;
+}
+
+function revalidateMarkPages() {
+  revalidatePath("/staff/marks");
+  revalidatePath("/teacher/marks");
+}
+
 export async function createMarkAction(_prev: MarkFormState, formData: FormData): Promise<MarkFormState> {
-  const ctx = await requireStaff();
+  const ctx = await requireGrader();
 
   const parsed = createMarkSchema.safeParse({
     studentId: formData.get("studentId"),
@@ -24,10 +36,10 @@ export async function createMarkAction(_prev: MarkFormState, formData: FormData)
     return { error: "Выберите оценку от 1 до 5" };
   }
 
-  const result = await createFacultyMark(ctx, parsed.data);
+  const result = await createMark(ctx, parsed.data);
   if (!result.ok) return { error: result.error };
 
-  revalidatePath("/staff/marks");
+  revalidateMarkPages();
   return {
     success: `Оценка «${result.value}» выставлена: ${result.student}, ${result.discipline}, ${formatDayMonthLong(result.date)} (${result.start})`,
     savedAt: Date.now(),
@@ -35,9 +47,9 @@ export async function createMarkAction(_prev: MarkFormState, formData: FormData)
 }
 
 export async function deleteMarkAction(formData: FormData): Promise<void> {
-  const ctx = await requireStaff();
+  const ctx = await requireGrader();
   const parsed = deleteMarkSchema.safeParse({ markId: formData.get("markId") });
   if (!parsed.success) return;
-  await deleteFacultyMark(ctx, parsed.data.markId);
-  revalidatePath("/staff/marks");
+  await deleteMark(ctx, parsed.data.markId);
+  revalidateMarkPages();
 }

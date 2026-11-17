@@ -99,6 +99,9 @@ async function main(): Promise<number> {
       console.log(`  студент  ${s.login.padEnd(30)} ${s.fullName}, ${s.faculty}, ${s.course} курс, ${s.group}`);
     }
     for (const s of summary.staff) console.log(`  деканат  ${s.login.padEnd(30)} ${s.fullName}, ${s.faculty}`);
+    if (summary.testTeacher) {
+      console.log(`  препод.  ${summary.testTeacher.login.padEnd(30)} ${summary.testTeacher.fullName}`);
+    }
     console.log(process.env.DEMO_PASSWORD ? "  Пароль: из DEMO_PASSWORD" : `  Пароль: ${DEFAULT_DEMO_PASSWORD}`);
 
     const rows = `${n(summary.credentialsRows)} ${plural(summary.credentialsRows, ["строка", "строки", "строк"])}`;

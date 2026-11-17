@@ -1,6 +1,8 @@
 import "server-only";
+import { isDemoMode } from "@/lib/config";
 import { db } from "@/lib/db";
-import type { StaffContext, StudentContext } from "@/lib/auth/guards";
+import type { StaffContext, StudentContext, TeacherContext } from "@/lib/auth/guards";
+import type { Prisma } from "@/lib/generated/prisma/client";
 import {
   average,
   matchesDateQuery,
@@ -31,6 +33,8 @@ export type MarkItem = {
   /** «Семинар», «Лекция»… */
   kind: string;
   value: MarkValue;
+  /** Выставлена после последнего открытия «Оценок» студентом */
+  isNew: boolean;
 };
 
 export type SemesterBar = { no: number; average: number | null; count: number; current: boolean };
@@ -39,6 +43,8 @@ export type DisciplineMarks = { name: string; average: number | null; marks: Mar
 
 export type MarksOverview = {
   today: string;
+  /** Оценок, выставленных после последнего открытия «Оценок» */
+  newCount: number;
   semesterNo: number;
   semesterFrom: string;
   semesterTo: string;
@@ -58,7 +64,7 @@ export type MarksOverview = {
 
 export async function getMyMarksOverview(ctx: StudentContext, today: string = moscowToday()): Promise<MarksOverview> {
   const [student, marks, grades] = await Promise.all([
-    db.student.findUniqueOrThrow({ where: { id: ctx.studentId }, select: { course: true } }),
+    db.student.findUniqueOrThrow({ where: { id: ctx.studentId }, select: { course: true, marksSeenAt: true } }),
     db.mark.findMany({
       where: { studentId: ctx.studentId, date: { lte: isoDateToDb(today) } },
       orderBy: [{ date: "desc" }, { startTime: "desc" }, { createdAt: "desc" }],
@@ -68,6 +74,7 @@ export async function getMyMarksOverview(ctx: StudentContext, today: string = mo
         startTime: true,
         lessonKind: true,
         value: true,
+        createdAt: true,
         discipline: { select: { name: true } },
       },
     }),
@@ -85,6 +92,7 @@ export async function getMyMarksOverview(ctx: StudentContext, today: string = mo
     discipline: m.discipline.name,
     kind: m.lessonKind,
     value: m.value as MarkValue,
+    isNew: m.createdAt > student.marksSeenAt,
   }));
 
   // Все числовые оценки с номером семестра
@@ -119,6 +127,7 @@ export async function getMyMarksOverview(ctx: StudentContext, today: string = mo
 
   return {
     today,
+    newCount: items.filter((m) => m.isNew).length,
     semesterNo,
     semesterFrom,
     semesterTo,
@@ -134,12 +143,52 @@ export async function getMyMarksOverview(ctx: StudentContext, today: string = mo
   };
 }
 
-// ─── Сотрудник деканата: ввод оценок ────────────────────────────────
+/** Сколько оценок выставлено после того, как студент последний раз открывал «Оценки» (кружок в меню). */
+export async function countMyNewMarks(ctx: StudentContext, today: string = moscowToday()): Promise<number> {
+  const s = await db.student.findUniqueOrThrow({ where: { id: ctx.studentId }, select: { marksSeenAt: true } });
+  return db.mark.count({
+    where: { studentId: ctx.studentId, createdAt: { gt: s.marksSeenAt }, date: { lte: isoDateToDb(today) } },
+  });
+}
 
-/** Студент своего факультета и его группы; чужой или несуществующий — null. */
-async function facultyStudent(ctx: StaffContext, studentId: string) {
+/** Студент открыл «Оценки»: все выставленные до этого момента оценки — просмотрены. */
+export async function markMyMarksSeen(ctx: StudentContext, now: Date = new Date()): Promise<void> {
+  await db.student.update({ where: { id: ctx.studentId }, data: { marksSeenAt: now } });
+}
+
+// ─── Ввод оценок: деканат или преподаватель ─────────────────────────
+//
+// «Кто ставит» (Grader):
+//   деканат       → студенты своего факультета, любые занятия их групп;
+//   преподаватель → студенты групп, у которых он ведёт занятия, и только ЕГО занятия (lesson.teacherId).
+
+export type Grader = StaffContext | TeacherContext;
+
+function isTeacher(ctx: Grader): ctx is TeacherContext {
+  return "teacherId" in ctx;
+}
+
+/** Группы, у которых преподаватель ведёт занятия. */
+async function teacherGroupIds(teacherId: string): Promise<string[]> {
+  const rows = await db.lessonGroup.findMany({
+    where: { lesson: { teacherId } },
+    distinct: ["groupId"],
+    select: { groupId: true },
+  });
+  return rows.map((r) => r.groupId);
+}
+
+/** Какие студенты доступны: деканату — свой факультет, преподавателю — студенты его групп. */
+async function studentScope(ctx: Grader): Promise<Prisma.StudentWhereInput> {
+  if (!isTeacher(ctx)) return { facultyId: ctx.facultyId };
+  const groupIds = await teacherGroupIds(ctx.teacherId);
+  return { OR: [{ academicGroupId: { in: groupIds } }, { languageGroups: { some: { groupId: { in: groupIds } } } }] };
+}
+
+/** Доступный студент и его группы; чужой или несуществующий — null. */
+async function gradableStudent(ctx: Grader, studentId: string) {
   const s = await db.student.findFirst({
-    where: { id: studentId, facultyId: ctx.facultyId },
+    where: { id: studentId, ...(await studentScope(ctx)) },
     select: {
       id: true,
       lastName: true,
@@ -156,12 +205,14 @@ async function facultyStudent(ctx: StaffContext, studentId: string) {
 /**
  * Занятия, на которых можно ставить оценку: в группах студента, не отменены и уже начались —
  * в прошлые дни или сегодня не позже текущего времени по Москве («HH:MM» сравнивается как строка).
+ * Преподавателю — только его собственные занятия.
  */
-function gradableLessonsWhere(groupIds: string[], today: string, nowTime: string = moscowNowTime()) {
+function gradableLessonsWhere(ctx: Grader, groupIds: string[], today: string, nowTime: string = moscowNowTime()) {
   return {
     status: { not: "CANCELLED" as const },
     groups: { some: { groupId: { in: groupIds } } },
     OR: [{ date: { lt: isoDateToDb(today) } }, { date: isoDateToDb(today), startTime: { lte: nowTime } }],
+    ...(isTeacher(ctx) ? { teacherId: ctx.teacherId } : {}),
   };
 }
 
@@ -170,22 +221,24 @@ const fio = (s: { lastName: string; firstName: string; middleName: string | null
 
 const ruDate = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`;
 
-/** Подсказки «Студент»: фамилия, имя, отчество, группа или логин — только свой факультет. */
-export async function suggestFacultyStudents(ctx: StaffContext, q: string): Promise<MarkSuggestItem[]> {
+/** Подсказки «Студент»: фамилия, имя, отчество, группа или логин — только доступные студенты. */
+export async function suggestGradableStudents(ctx: Grader, q: string): Promise<MarkSuggestItem[]> {
   const tokens = q.split(/\s+/).filter(Boolean).slice(0, 4);
   if (tokens.length === 0) return [];
   const rows = await db.student.findMany({
     where: {
-      facultyId: ctx.facultyId,
-      AND: tokens.map((t) => ({
-        OR: [
-          { lastName: { startsWith: t, mode: "insensitive" as const } },
-          { firstName: { startsWith: t, mode: "insensitive" as const } },
-          { middleName: { startsWith: t, mode: "insensitive" as const } },
-          { academicGroup: { name: { startsWith: t, mode: "insensitive" as const } } },
-          { user: { login: { startsWith: t, mode: "insensitive" as const } } },
-        ],
-      })),
+      AND: [
+        await studentScope(ctx),
+        ...tokens.map((t) => ({
+          OR: [
+            { lastName: { startsWith: t, mode: "insensitive" as const } },
+            { firstName: { startsWith: t, mode: "insensitive" as const } },
+            { middleName: { startsWith: t, mode: "insensitive" as const } },
+            { academicGroup: { name: { startsWith: t, mode: "insensitive" as const } } },
+            { user: { login: { startsWith: t, mode: "insensitive" as const } } },
+          ],
+        })),
+      ],
     },
     orderBy: [{ lastName: "asc" }, { firstName: "asc" }, { id: "asc" }],
     take: MARK_SUGGEST_LIMIT,
@@ -194,19 +247,19 @@ export async function suggestFacultyStudents(ctx: StaffContext, q: string): Prom
   return rows.map((s) => ({ id: s.id, label: fio(s), meta: `${s.academicGroup.name} · ${s.course} курс` }));
 }
 
-/** Подсказки «Предмет»: дисциплины, по которым у студента уже были занятия. */
-export async function suggestStudentDisciplines(
-  ctx: StaffContext,
+/** Подсказки «Предмет»: дисциплины, по которым у студента уже были занятия (у преподавателя — его занятия). */
+export async function suggestGradableDisciplines(
+  ctx: Grader,
   studentId: string,
   q: string,
   today: string = moscowToday(),
 ): Promise<MarkSuggestItem[]> {
-  const student = await facultyStudent(ctx, studentId);
+  const student = await gradableStudent(ctx, studentId);
   if (!student) return [];
   const rows = await db.discipline.findMany({
     where: {
       name: q ? { contains: q, mode: "insensitive" } : undefined,
-      lessons: { some: gradableLessonsWhere(student.groupIds, today) },
+      lessons: { some: gradableLessonsWhere(ctx, student.groupIds, today) },
     },
     orderBy: { name: "asc" },
     take: MARK_SUGGEST_LIMIT,
@@ -223,17 +276,17 @@ export async function suggestStudentDisciplines(
  * Подсказки «Дата»: прошедшие занятия студента по предмету, сначала последние.
  * Каждая подсказка — конкретное занятие (если в один день две пары — будут две подсказки с разным временем).
  */
-export async function suggestStudentLessons(
-  ctx: StaffContext,
+export async function suggestGradableLessons(
+  ctx: Grader,
   studentId: string,
   disciplineId: string,
   q: string,
   today: string = moscowToday(),
 ): Promise<MarkSuggestItem[]> {
-  const student = await facultyStudent(ctx, studentId);
+  const student = await gradableStudent(ctx, studentId);
   if (!student) return [];
   const rows = await db.lesson.findMany({
-    where: { disciplineId, ...gradableLessonsWhere(student.groupIds, today) },
+    where: { disciplineId, ...gradableLessonsWhere(ctx, student.groupIds, today) },
     orderBy: [{ date: "desc" }, { startTime: "desc" }],
     take: 300,
     select: {
@@ -254,26 +307,37 @@ export async function suggestStudentLessons(
     }));
 }
 
+/** Сколько оценок в час может выставить один автор (на демо-стенде — меньше). */
+export const MAX_MARKS_PER_HOUR = 300;
+export const MAX_MARKS_PER_HOUR_DEMO = 60;
+export function marksPerHourLimit(): number {
+  return isDemoMode() ? MAX_MARKS_PER_HOUR_DEMO : MAX_MARKS_PER_HOUR;
+}
+
 export type CreateMarkResult =
   | { ok: true; student: string; discipline: string; date: string; start: string; value: number }
   | { ok: false; error: string };
 
-/** Выставить оценку студенту своего факультета за прошедшее занятие его группы. */
-export async function createFacultyMark(
-  ctx: StaffContext,
-  input: CreateMarkInput,
-  today: string = moscowToday(),
-): Promise<CreateMarkResult> {
-  const student = await facultyStudent(ctx, input.studentId);
-  if (!student) return { ok: false, error: "Студент не найден на вашем факультете" };
+/** Выставить оценку доступному студенту за прошедшее занятие его группы (преподаватель — только за своё). */
+export async function createMark(ctx: Grader, input: CreateMarkInput, today: string = moscowToday()): Promise<CreateMarkResult> {
+  const student = await gradableStudent(ctx, input.studentId);
+  if (!student) {
+    return { ok: false, error: isTeacher(ctx) ? "Студент не найден в ваших группах" : "Студент не найден на вашем факультете" };
+  }
 
   const lesson = await db.lesson.findFirst({
-    where: { id: input.lessonId, ...gradableLessonsWhere(student.groupIds, today) },
+    where: { id: input.lessonId, ...gradableLessonsWhere(ctx, student.groupIds, today) },
     select: { id: true, oid: true, date: true, startTime: true, kind: true, disciplineId: true, discipline: { select: { name: true } } },
   });
   if (!lesson) {
-    return { ok: false, error: "У студента не было такого занятия (или оно ещё не началось) — выберите дату из списка" };
+    return { ok: false, error: "Такого занятия у студента не было (или оно ещё не началось) — выберите дату из списка" };
   }
+
+  // Защита от массовой порчи оценок (на демо-стенде аккаунты общие): не больше N оценок в час на автора
+  const author = isTeacher(ctx) ? { teacherId: ctx.teacherId } : { createdById: ctx.staffId };
+  const lastHour = await db.mark.count({ where: { ...author, createdAt: { gte: new Date(Date.now() - 3_600_000) } } });
+  const limit = marksPerHourLimit();
+  if (lastHour >= limit) return { ok: false, error: `Не больше ${limit} оценок в час — попробуйте позже` };
 
   const existing = await db.mark.count({ where: { studentId: student.id, lessonId: lesson.id } });
   if (existing >= MAX_MARKS_PER_LESSON) {
@@ -290,7 +354,9 @@ export async function createFacultyMark(
       startTime: lesson.startTime,
       lessonKind: lesson.kind,
       value: input.value,
-      createdById: ctx.staffId,
+      // кто выставил — из сессии
+      createdById: isTeacher(ctx) ? null : ctx.staffId,
+      teacherId: isTeacher(ctx) ? ctx.teacherId : null,
     },
   });
   return {
@@ -314,10 +380,13 @@ export type RecentMark = {
   createdAt: Date;
 };
 
-/** Последние оценки, выставленные деканатом этого факультета (для проверки и исправления ошибок). */
-export async function listRecentFacultyMarks(ctx: StaffContext, take = 10): Promise<RecentMark[]> {
+/**
+ * Последние выставленные через форму оценки (для проверки и исправления ошибок):
+ * деканату — выставленные деканатом своего факультета, преподавателю — свои.
+ */
+export async function listRecentMarks(ctx: Grader, take = 10): Promise<RecentMark[]> {
   const rows = await db.mark.findMany({
-    where: { student: { facultyId: ctx.facultyId }, createdById: { not: null } },
+    where: isTeacher(ctx) ? { teacherId: ctx.teacherId } : { student: { facultyId: ctx.facultyId }, createdById: { not: null } },
     orderBy: { createdAt: "desc" },
     take,
     select: {
@@ -342,8 +411,15 @@ export async function listRecentFacultyMarks(ctx: StaffContext, take = 10): Prom
   }));
 }
 
-/** Удалить оценку студента своего факультета. false — не найдена (или чужая). */
-export async function deleteFacultyMark(ctx: StaffContext, markId: string): Promise<boolean> {
-  const { count } = await db.mark.deleteMany({ where: { id: markId, student: { facultyId: ctx.facultyId } } });
+/**
+ * Удалить оценку, выставленную через форму. Деканат — выставленную деканатом своего факультета
+ * (оценки преподавателей деканат не удаляет), преподаватель — только выставленную им.
+ * false — не найдена (или чужая).
+ */
+export async function deleteMark(ctx: Grader, markId: string): Promise<boolean> {
+  const where = isTeacher(ctx)
+    ? { id: markId, teacherId: ctx.teacherId }
+    : { id: markId, student: { facultyId: ctx.facultyId }, createdById: { not: null } };
+  const { count } = await db.mark.deleteMany({ where });
   return count > 0;
 }

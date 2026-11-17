@@ -256,6 +256,7 @@ docker compose up -d app
 | [`docs/DESIGN.md`](docs/DESIGN.md) | Дизайн-система: принципы, токены, навигация, компоненты |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Дорожная карта и прогресс по этапам |
 | [`docs/MARKS.md`](docs/MARKS.md) | Оценки на занятиях: модель, инфографика студента, ввод оценок деканатом |
+| [`docs/TEACHERS.md`](docs/TEACHERS.md) | Кабинет преподавателя, распределение групп по преподавателям, кружки «новое» |
 | [`docs/NOTIFICATIONS.md`](docs/NOTIFICATIONS.md) | Уведомления: события деканата, отложенная отправка, колокольчик студента |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Замеры нагрузки, требования к серверу, шаги развёртывания |
 | [`docs/PROMPTS.md`](docs/PROMPTS.md) | Шаблоны промптов для типовых задач |

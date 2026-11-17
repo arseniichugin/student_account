@@ -6,16 +6,16 @@ import { Combobox, type ComboboxItem } from "@/components/ui/combobox";
 import { FormMessage } from "@/components/ui/form";
 import { MARK_VALUES } from "@/lib/marks/stats";
 import { cn } from "@/lib/utils";
-import { createMarkAction } from "./actions";
+import { createMarkAction } from "@/lib/marks/form-actions";
 
-const SUGGEST = "/api/staff/marks/suggest";
+const SUGGEST = "/api/marks/suggest";
 
 /**
  * Ввод оценки: Студент → Предмет → Дата → Оценка.
  * Каждое поле подтягивает до 5 подсказок с сервера; следующее поле открывается, когда выбрано предыдущее.
  * После сохранения студент и предмет остаются — удобно ставить несколько оценок подряд.
  */
-export function MarkForm() {
+export function MarkForm({ emptyStudentText }: { emptyStudentText: string }) {
   const [state, formAction, pending] = useActionState(createMarkAction, undefined);
   const [student, setStudent] = useState<ComboboxItem | null>(null);
   const [discipline, setDiscipline] = useState<ComboboxItem | null>(null);
@@ -49,7 +49,7 @@ export function MarkForm() {
             setDiscipline(null);
             setLesson(null);
           }}
-          emptyText="На вашем факультете такого студента нет"
+          emptyText={emptyStudentText}
         />
         <Combobox
           key={`d:${student?.id}`}

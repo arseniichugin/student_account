@@ -175,10 +175,11 @@ describe("Адреса", () => {
 });
 
 describe("Меню", () => {
-  it("студент: 6 пунктов, сотрудник: 5; расписание и карта — у обоих", () => {
+  it("студент: 6 пунктов, сотрудник: 5, преподаватель: 4 (без заявок); расписание и карта — у всех", () => {
     expect(NAV.STUDENT.map((i) => i.href)).toEqual(["/today", "/schedule", "/map", "/grades", "/requests", "/profile"]);
     expect(NAV.STAFF.map((i) => i.href)).toEqual(["/staff", "/staff/marks", "/staff/notifications", "/schedule", "/map"]);
-    expect(HOME).toEqual({ STUDENT: "/today", STAFF: "/staff" });
+    expect(NAV.TEACHER.map((i) => i.href)).toEqual(["/schedule", "/teacher/marks", "/teacher/notifications", "/map"]);
+    expect(HOME).toEqual({ STUDENT: "/today", STAFF: "/staff", TEACHER: "/schedule" });
   });
 
   it("активный пункт — сам раздел и подстраницы, но не похожие адреса", () => {

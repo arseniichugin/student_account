@@ -3,7 +3,7 @@
 import { useTransition } from "react";
 import { Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { deleteMarkAction } from "./actions";
+import { deleteMarkAction } from "@/lib/marks/form-actions";
 
 /** Удаление оценки — только после подтверждения: одно случайное касание не должно стирать оценку. */
 export function DeleteMarkButton({ markId, label }: { markId: string; label: string }) {
