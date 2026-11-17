@@ -146,6 +146,7 @@ model Student {
   /// Языковые группы (0–2), в порядке колонок «Языковая группа 1/2»
   languageGroups  StudentGroup[]
   grades          Grade[]
+  marks           Mark[]
   requests        Request[]
 
   @@index([facultyId])
@@ -173,6 +174,8 @@ model Staff {
   faculty   Faculty @relation(fields: [facultyId], references: [id], onDelete: Cascade)
   fullName  String
   position  String
+  /// Оценки на занятиях, которые выставил сотрудник
+  marks     Mark[]
 }
 
 // ─── Расписание (из schedule.csv и campus-map.json; при импорте заменяется целиком) ─
@@ -240,6 +243,7 @@ model Discipline {
   oid       String?
   lessons   Lesson[]
   grades    Grade[]
+  marks     Mark[]
   deadlines Deadline[]
 }
 
@@ -288,6 +292,7 @@ model Lesson {
   urlDescription String?
   status         LessonStatus  @default(NORMAL)
   groups         LessonGroup[]
+  marks          Mark[]
 
   @@index([date])
   @@index([teacherId, date])
@@ -341,6 +346,39 @@ model Grade {
   @@index([studentId, semester])
 }
 
+/// Оценка на занятии (текущая успеваемость). На одном занятии у студента может быть
+/// сколько угодно оценок — или ни одной. Сейчас оценки выставляет деканат (/staff/marks).
+/// Импорт расписания пересоздаёт занятия: lessonId на время обнуляется (SetNull) и
+/// восстанавливается по lessonOid, а дата и дисциплина хранятся в самой оценке — оценки не теряются.
+model Mark {
+  id           String     @id @default(cuid())
+  studentId    String
+  student      Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  lessonId     String?
+  lesson       Lesson?    @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+  /// lessonOid занятия из schedule.csv — по нему импорт заново связывает оценку с занятием
+  lessonOid    String
+  disciplineId String
+  discipline   Discipline @relation(fields: [disciplineId], references: [id])
+  /// Дата занятия по Москве (копия из занятия — для выборок «за неделю», «за семестр»)
+  date         DateTime   @db.Date
+  /// Время начала занятия «10:30» (копия — для подписи, если занятие пропало из расписания)
+  startTime    String
+  /// Вид работы занятия: «Семинар», «Лекция»…
+  lessonKind   String
+  /// Оценка по пятибалльной шкале: 1–5
+  value        Int
+  /// Кто выставил (сотрудник деканата); null — демо-наполнение или сотрудник удалён
+  createdById  String?
+  createdBy    Staff?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt    DateTime   @default(now())
+
+  @@index([studentId, date])
+  @@index([lessonId])
+  @@index([lessonOid])
+  @@index([createdById, createdAt])
+}
+
 // ─── Заявки и справки ───────────────────────────────────────────────
 
 enum RequestStatus {
@@ -380,40 +418,57 @@ model Request {
 
 // ─── Объявления и уведомления ───────────────────────────────────────
 
+/// Событие деканата: сообщение, дата экзамена, срок сдачи… Создаёт только деканат (/staff/notifications).
+/// При создании каждому получателю создаётся уведомление (Notification) — студент видит его,
+/// когда наступит publishedAt (отложенная отправка без фоновых задач).
 model Announcement {
-  id          String   @id @default(cuid())
-  authorId    String
-  author      User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  title       String
-  body        String
+  id            String           @id @default(cuid())
+  authorId      String
+  author        User             @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  /// Вид события — он же тип уведомлений получателей
+  kind          NotificationType @default(ANNOUNCEMENT)
+  title         String
+  body          String
   /// Аудитория: если поля пустые — для всех. Иначе — только для факультета / курса / группы.
-  facultyId   String?
-  faculty     Faculty? @relation(fields: [facultyId], references: [id], onDelete: Cascade)
-  course      Int?
-  groupId     String?
-  group       Group?   @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  publishedAt DateTime @default(now())
+  facultyId     String?
+  faculty       Faculty?         @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+  course        Int?
+  groupId       String?
+  group         Group?           @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  /// Время отправки: студенты увидят уведомление начиная с этого момента
+  publishedAt   DateTime         @default(now())
+  createdAt     DateTime         @default(now())
+  notifications Notification[]
 
   @@index([publishedAt])
+  @@index([facultyId, publishedAt])
 }
 
 enum NotificationType {
+  /// Сообщение деканата
   ANNOUNCEMENT
   SCHEDULE_CHANGE
   REQUEST_STATUS
   DEADLINE
+  /// Экзамен, зачёт
+  EXAM
 }
 
 model Notification {
-  id        String           @id @default(cuid())
-  userId    String
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type      NotificationType
-  title     String
-  body      String
-  link      String?
-  readAt    DateTime?
-  createdAt DateTime         @default(now())
+  id             String           @id @default(cuid())
+  userId         String
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type           NotificationType
+  title          String
+  body           String
+  link           String?
+  readAt         DateTime?
+  /// Момент, с которого уведомление видно получателю (у отложенных событий — в будущем)
+  createdAt      DateTime         @default(now())
+  /// Событие деканата, из которого создано уведомление (отмена события удаляет уведомления)
+  announcementId String?
+  announcement   Announcement?    @relation(fields: [announcementId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+  @@index([announcementId])
 }

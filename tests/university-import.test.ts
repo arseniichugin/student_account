@@ -27,11 +27,14 @@ afterAll(async () => {
 });
 
 async function snapshot() {
-  const [users, students, requests, grades, deadlines, groups, teachers, rooms, lessons, lessonGroups, memberships] = await Promise.all([
+  const [users, students, requests, grades, marks, unlinkedMarks, deadlines, groups, teachers, rooms, lessons, lessonGroups, memberships] = await Promise.all([
     db.user.findMany({ select: { id: true, login: true, passwordHash: true, isDemo: true }, orderBy: { login: "asc" } }),
     db.student.findMany({ select: { id: true, externalId: true, academicGroupId: true }, orderBy: { externalId: "asc" } }),
     db.request.findMany({ select: { id: true, studentId: true, status: true }, orderBy: { id: "asc" } }),
     db.grade.count(),
+    // Оценки на занятиях переживают пересоздание занятий: импорт связывает их заново по lessonOid
+    db.mark.count(),
+    db.mark.count({ where: { lessonId: null } }),
     db.deadline.findMany({ select: { id: true, groupId: true }, orderBy: { id: "asc" } }),
     db.group.findMany({ select: { id: true, name: true, kind: true, parentId: true }, orderBy: { name: "asc" } }),
     db.teacher.findMany({ select: { id: true, oid: true }, orderBy: { oid: "asc" } }),
@@ -40,7 +43,7 @@ async function snapshot() {
     db.lessonGroup.count(),
     db.studentGroup.count(),
   ]);
-  return { users, students, requests, grades, deadlines, groups, teachers, rooms, lessons, lessonGroups, memberships };
+  return { users, students, requests, grades, marks, unlinkedMarks, deadlines, groups, teachers, rooms, lessons, lessonGroups, memberships };
 }
 
 describe("Повторный импорт", () => {
@@ -50,6 +53,8 @@ describe("Повторный импорт", () => {
 
     const before = await snapshot();
     expect(before.requests.length).toBeGreaterThan(0);
+    expect(before.marks).toBeGreaterThan(0);
+    expect(before.unlinkedMarks).toBe(0);
     const credentialsPath = path.join(tmp, "credentials.csv");
 
     const summary = await importUniversityData(db, result.data, {

@@ -20,6 +20,8 @@
 | `docs/DESIGN.md` | Дизайн-система: цвета, шрифты, компоненты, состояния | Перед любой работой с интерфейсом |
 | `docs/ROADMAP.md` | Этапы и текущий прогресс | В начале сессии |
 | `docs/DEPLOYMENT.md` | Замеры нагрузки, требования к серверу, шаги развёртывания | Перед работой с Docker и сервером |
+| `docs/MARKS.md` | Оценки на занятиях: модель, инфографика студента, ввод оценок деканатом | Перед работой с успеваемостью |
+| `docs/NOTIFICATIONS.md` | Уведомления: события деканата, отложенная отправка, колокольчик студента | Перед работой с уведомлениями |
 | `docs/AI_LOG.md` | Дневник работы с ИИ | Дополнять в конце каждой задачи |
 | `docs/PROMPTS.md` | Шаблоны промптов | Когда ставишь задачу субагенту |
 
@@ -97,15 +99,21 @@ Next.js 16 (App Router) + TypeScript · React 19 · Tailwind CSS 4 · PostgreSQL
 ```
 app/(auth)/login/        вход
 app/(app)/               кабинет: layout (requireUser) рисует оболочку и меню по роли; error.tsx — «Повторить»
-app/(app)/(student)/     страницы студента: today, requests, profile (layout + КАЖДАЯ страница — requireStudent)
-app/(app)/(staff)/staff/ кабинет сотрудника деканата (requireStaff)
+app/(app)/(student)/     страницы студента: today, grades, notifications, requests, profile (layout + КАЖДАЯ страница — requireStudent)
+app/(app)/(staff)/staff/ кабинет сотрудника деканата (requireStaff); marks/ — ввод оценок; notifications/ — события и уведомления
 app/(app)/schedule/      расписание группы/преподавателя — обе роли (requireUser)
 app/(app)/map/           карта кампуса — обе роли (requireUser)
 app/api/schedule/search/ подсказки поиска (getUserContext → 401 без сессии; студентов не возвращает)
+app/api/staff/marks/suggest/ подсказки ввода оценок (getStaffContext → 401; только свой факультет, ≤ 5)
+app/api/staff/notifications/groups/ подсказки групп для событий (getStaffContext → 401; свой факультет, ≤ 5)
 lib/navigation.ts        меню для каждой роли — ЕДИНСТВЕННОЕ место, где перечислены разделы
 lib/auth/                сессии, пароли, ограничение попыток, guards, серверные действия входа
 lib/data/                ЕДИНСТВЕННОЕ место запросов к базе из страниц; всё фильтруется по контексту
 lib/data/schedule.ts     расписание: личное (StudentContext), группы/преподавателя и поиск (UserContext)
+lib/data/marks.ts        оценки на занятиях: обзор студента (StudentContext), ввод деканатом (StaffContext)
+lib/data/notifications.ts  события деканата (StaffContext) и уведомления студента (StudentContext, только createdAt ≤ now)
+lib/notifications/labels.ts  подписи видов событий и аудиторий (годится клиенту)
+lib/marks/stats.ts       семестры по датам, средние, разбор даты «12.11» (чистые функции)
 lib/data/schedule-moves.ts  заглушки «Перенесено на …» (те же myGroupIds/checkRange из schedule.ts)
 lib/validation/          схемы Zod
 lib/university-data/     разбор и проверка файлов вуза, импорт в базу (без server-only — нужен скрипту)
@@ -116,6 +124,7 @@ lib/safe-url.ts          safeExternalUrl — в ссылку попадает т
 lib/config.ts            UNIVERSITY_NAME (название вуза, env), isDemoMode()
 lib/requests/status.ts   подписи статусов заявок (годится и клиенту)
 components/ui/           базовые компоненты (Button, Input, Card, EmptyState, Skeleton…)
+components/ui/combobox.tsx  поле с подсказками при наборе (до 5 вариантов)
 components/schedule/     LessonCard / LessonList, неделя, навигация по датам, поиск, скелетоны
 components/campus-map/   обёртка карты кампуса для React (грузит public/campus-map/)
 public/campus-map/       карта кампуса без зависимостей (campus-map.js / .css) — уходит в браузер
@@ -141,7 +150,7 @@ tests/                   автотесты безопасности, импор
 | `npm run dev` | Режим разработки, http://localhost:3000 |
 | `npm run db:migrate -- --name <имя>` | Новая миграция после правки `schema.prisma` |
 | `npm run db:reset` | Пересоздать базу с нуля: миграции + импорт + демо-контент |
-| `npm run db:seed` | Пересоздать демо-контент (заявки, оценки, объявления, уведомления, дедлайны) поверх импорта |
+| `npm run db:seed` | Пересоздать демо-контент (заявки, оценки ведомостей и оценки на занятиях, объявления, уведомления, дедлайны) поверх импорта |
 | `npm run lint` · `npm run typecheck` · `npm test` | Проверки — запускать перед каждым коммитом |
 | `npm run build` | Продакшен-сборка |
 

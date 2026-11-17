@@ -1,9 +1,9 @@
 "use client";
 
-import { CalendarDays, FileText, Inbox, MapPinned, Sun, UserRound } from "lucide-react";
+import { Bell, CalendarDays, ChartColumn, FileText, Inbox, MapPinned, NotebookPen, Sun, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { isNavActive, type NavIcon, type NavItem } from "@/lib/navigation";
+import { activeNavHref, type NavIcon, type NavItem } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
 // Иконки задаются строкой: серверный компонент не может передать функцию в клиентский.
@@ -14,13 +14,17 @@ const ICONS: Record<NavIcon, typeof Sun> = {
   file: FileText,
   user: UserRound,
   inbox: Inbox,
+  chart: ChartColumn,
+  pen: NotebookPen,
+  bell: Bell,
 };
 
 const STYLES = {
   bottom: {
     list: "flex",
     item: "min-w-0 flex-1",
-    link: "flex min-h-14 flex-col items-center justify-center gap-0.5 px-0.5 text-[11px] font-medium",
+    // 6 пунктов на 360 px — по 60 px: подпись 10 px со сжатым трекингом, чтобы «Расписание» помещалось целиком
+    link: "flex min-h-14 flex-col items-center justify-center gap-0.5 px-0 text-[10px] font-medium tracking-[-0.02em] min-[400px]:text-[11px] min-[400px]:tracking-normal",
     active: "text-primary",
     idle: "text-muted hover:text-text",
     icon: "size-6",
@@ -38,12 +42,13 @@ const STYLES = {
 export function NavLinks({ items, variant }: { items: NavItem[]; variant: keyof typeof STYLES }) {
   const pathname = usePathname();
   const s = STYLES[variant];
+  const activeHref = activeNavHref(items, pathname);
 
   return (
     <ul className={s.list}>
-      {items.map(({ href, label, icon }) => {
+      {items.map(({ href, label, icon, badge }) => {
         const Icon = ICONS[icon];
-        const active = isNavActive(href, pathname);
+        const active = href === activeHref;
         return (
           <li key={href} className={s.item}>
             <Link
@@ -53,6 +58,12 @@ export function NavLinks({ items, variant }: { items: NavItem[]; variant: keyof 
             >
               <Icon className={s.icon} aria-hidden />
               <span className="max-w-full truncate">{label}</span>
+              {badge ? (
+                <span className="ml-auto min-w-6 rounded-full bg-primary px-1.5 text-center text-xs leading-6 font-semibold text-on-primary">
+                  {badge > 99 ? "99+" : badge}
+                  <span className="sr-only"> непрочитанных</span>
+                </span>
+              ) : null}
             </Link>
           </li>
         );

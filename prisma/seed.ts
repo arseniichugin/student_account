@@ -10,7 +10,7 @@
  */
 import "dotenv/config";
 import type { GradeKind, NotificationType, RequestStatus } from "@/lib/generated/prisma/client";
-import { dbDateToIso, moscowDateTime } from "@/lib/moscow-time";
+import { dbDateToIso, isoDateToDb, moscowDateTime, moscowToday } from "@/lib/moscow-time";
 import { createPrismaClient } from "@/lib/prisma-client";
 import { formatDayMonthLong } from "@/lib/schedule/dates";
 
@@ -162,6 +162,7 @@ async function main() {
     db.announcement.deleteMany(),
     db.request.deleteMany(),
     db.grade.deleteMany(),
+    db.mark.deleteMany(),
     db.deadline.deleteMany(),
   ]);
 
@@ -247,6 +248,67 @@ async function main() {
     });
   }
   for (let i = 0; i < grades.length; i += 5000) await db.grade.createMany({ data: grades.slice(i, i + 5000) });
+
+  // ─── Оценки на занятиях ───────────────────────────────────────────
+  // Для каждого студента — по всем прошедшим (на день запуска seed, по Москве) неотменённым занятиям
+  // его групп: на занятии может быть 0, 1, 2 или 3 оценки. На семинарах оценок больше, на лекциях — редко.
+  // «Уровень» студента задаёт, какие оценки ему чаще ставят. Детерминировано для одного и того же дня запуска.
+  console.log("Оценки на занятиях…");
+  const today = moscowToday();
+  const pastLessons = await db.lesson.findMany({
+    where: { status: { not: "CANCELLED" }, date: { lte: isoDateToDb(today) } },
+    select: { id: true, oid: true, date: true, startTime: true, kind: true, disciplineId: true, groups: { select: { groupId: true } } },
+  });
+  const lessonsByGroup = new Map<string, typeof pastLessons>();
+  for (const l of pastLessons) {
+    for (const { groupId } of l.groups) lessonsByGroup.set(groupId, [...(lessonsByGroup.get(groupId) ?? []), l]);
+  }
+  // Веса оценок 5/4/3/2 для «сильного», «среднего» и «слабого» студента
+  const LEVELS = [
+    [5, 5, 5, 5, 4, 4, 4, 3],
+    [5, 5, 4, 4, 4, 4, 3, 3, 2],
+    [5, 4, 4, 3, 3, 3, 3, 2, 2],
+  ] as const;
+  const marks: {
+    studentId: string;
+    lessonId: string;
+    lessonOid: string;
+    disciplineId: string;
+    date: Date;
+    startTime: string;
+    lessonKind: string;
+    value: number;
+    createdById: null;
+  }[] = [];
+  for (const s of students) {
+    const level = LEVELS[debtors.has(s.id) ? 2 : hash(`level:${s.externalId}`) % 3]!;
+    const seen = new Set<string>();
+    for (const groupId of [s.academicGroupId, ...s.languageGroups.map((g) => g.groupId)]) {
+      for (const l of lessonsByGroup.get(groupId) ?? []) {
+        if (seen.has(l.id)) continue;
+        seen.add(l.id);
+        const rand = rng(`mark:${s.externalId}:${l.oid}`);
+        const lecture = /лекц/i.test(l.kind);
+        const r = rand();
+        const count = lecture ? (r < 0.93 ? 0 : 1) : r < 0.5 ? 0 : r < 0.85 ? 1 : r < 0.97 ? 2 : 3;
+        for (let k = 0; k < count; k++) {
+          marks.push({
+            studentId: s.id,
+            lessonId: l.id,
+            lessonOid: l.oid,
+            disciplineId: l.disciplineId,
+            date: l.date,
+            startTime: l.startTime,
+            lessonKind: l.kind,
+            value: pick(rand, level),
+            // null — демо-наполнение: в «Последних выставленных» у деканата видны только оценки, введённые через форму
+            createdById: null,
+          });
+        }
+      }
+    }
+  }
+  for (let i = 0; i < marks.length; i += 5000) await db.mark.createMany({ data: marks.slice(i, i + 5000) });
 
   // ─── Заявки ───────────────────────────────────────────────────────
   console.log("Заявки…");
@@ -425,6 +487,7 @@ async function main() {
     facultyId?: string | null;
     course?: number | null;
     publishedAt: Date;
+    kind?: NotificationType;
   };
   const announcements: AnnouncementSeed[] = [];
   for (const f of faculties) {
@@ -440,6 +503,7 @@ async function main() {
         : "Расписание экзаменов появится в кабинете за месяц до начала сессии.",
       facultyId: f.id,
       publishedAt: msk(2026, 11, 6, 12, 0),
+      kind: "EXAM",
     });
     if (courses[0] !== undefined) {
       announcements.push({
@@ -474,7 +538,12 @@ async function main() {
       publishedAt: msk(2026, 11, 7, 9, 0),
     });
   }
-  await db.announcement.createMany({ data: announcements });
+  // Создаём по одному, чтобы знать id: уведомления получателей ссылаются на событие
+  const createdAnnouncements: (AnnouncementSeed & { id: string })[] = [];
+  for (const a of announcements) {
+    const { id } = await db.announcement.create({ data: { ...a, createdAt: a.publishedAt }, select: { id: true } });
+    createdAnnouncements.push({ ...a, id });
+  }
 
   // ─── Уведомления ──────────────────────────────────────────────────
   console.log("Уведомления…");
@@ -486,6 +555,7 @@ async function main() {
     link?: string | null;
     createdAt: Date;
     readAt?: Date | null;
+    announcementId?: string | null;
   };
   const notifications: NotificationSeed[] = [];
   const studentById = new Map(students.map((s) => [s.id, s]));
@@ -535,15 +605,30 @@ async function main() {
         createdAt: msk(2026, 11, 8, 18, 0),
       });
     }
-    const ann = announcements.find((a) => a.facultyId === s.facultyId && (a.course == null || a.course === s.course));
-    if (ann) {
-      notifications.push({ userId: s.userId, type: "ANNOUNCEMENT", title: ann.title, body: ann.body, createdAt: ann.publishedAt });
+  }
+  // События деканатов — каждому получателю (как при отправке из кабинета деканата).
+  // Часть уже прочитана; у тестовых студентов — не прочитаны, чтобы на колокольчике было число.
+  const testIds = new Set(testStudents.map((s) => s.id));
+  for (const a of createdAnnouncements) {
+    for (const s of students) {
+      if (a.facultyId && a.facultyId !== s.facultyId) continue;
+      if (a.course != null && a.course !== s.course) continue;
+      const read = !testIds.has(s.id) && rng(`read:${a.id}:${s.externalId}`)() < 0.6;
+      notifications.push({
+        userId: s.userId,
+        type: a.kind ?? "ANNOUNCEMENT",
+        title: a.title,
+        body: a.body,
+        createdAt: a.publishedAt,
+        readAt: read ? new Date(a.publishedAt.getTime() + 86_400_000) : null,
+        announcementId: a.id,
+      });
     }
   }
-  await db.notification.createMany({ data: notifications });
+  for (let i = 0; i < notifications.length; i += 5000) await db.notification.createMany({ data: notifications.slice(i, i + 5000) });
 
   console.log(
-    `\nГотово: оценок ${grades.length}, заявок ${createdRequests.length}, дедлайнов ${deadlines.length}, ` +
+    `\nГотово: оценок в ведомостях ${grades.length}, оценок на занятиях ${marks.length}, заявок ${createdRequests.length}, дедлайнов ${deadlines.length}, ` +
       `объявлений ${announcements.length}, уведомлений ${notifications.length}.`,
   );
   console.log(`Тестовые студенты: ${testStudents.map((s) => s.user.login).join(", ") || "нет (запустите npm run data:import)"}`);

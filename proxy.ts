@@ -12,5 +12,5 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   // API (/api/*) сюда не входит: обработчик сам отвечает 401 без сессии, а не перенаправляет.
-  matcher: ["/today/:path*", "/schedule/:path*", "/map/:path*", "/requests/:path*", "/profile/:path*", "/staff/:path*"],
+  matcher: ["/today/:path*", "/schedule/:path*", "/map/:path*", "/grades/:path*", "/notifications/:path*", "/requests/:path*", "/profile/:path*", "/staff/:path*"],
 };

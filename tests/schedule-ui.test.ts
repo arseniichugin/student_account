@@ -2,7 +2,7 @@
  * Чистые функции экранов расписания (lib/schedule/*) и меню (lib/navigation.ts). База не нужна.
  */
 import { describe, expect, it } from "vitest";
-import { HOME, NAV, isNavActive } from "@/lib/navigation";
+import { HOME, NAV, activeNavHref, isNavActive } from "@/lib/navigation";
 import { moscowDateTime } from "@/lib/moscow-time";
 import {
   dayTiming,
@@ -175,9 +175,9 @@ describe("Адреса", () => {
 });
 
 describe("Меню", () => {
-  it("студент: 5 пунктов, сотрудник: 3; расписание и карта — у обоих", () => {
-    expect(NAV.STUDENT.map((i) => i.href)).toEqual(["/today", "/schedule", "/map", "/requests", "/profile"]);
-    expect(NAV.STAFF.map((i) => i.href)).toEqual(["/staff", "/schedule", "/map"]);
+  it("студент: 6 пунктов, сотрудник: 5; расписание и карта — у обоих", () => {
+    expect(NAV.STUDENT.map((i) => i.href)).toEqual(["/today", "/schedule", "/map", "/grades", "/requests", "/profile"]);
+    expect(NAV.STAFF.map((i) => i.href)).toEqual(["/staff", "/staff/marks", "/staff/notifications", "/schedule", "/map"]);
     expect(HOME).toEqual({ STUDENT: "/today", STAFF: "/staff" });
   });
 
@@ -185,5 +185,12 @@ describe("Меню", () => {
     expect(isNavActive("/requests", "/requests/abc")).toBe(true);
     expect(isNavActive("/staff", "/staff")).toBe(true);
     expect(isNavActive("/map", "/mapping")).toBe(false);
+  });
+
+  it("подсвечивается самый точный пункт: на /staff/marks — «Оценки», а не «Заявки»", () => {
+    expect(activeNavHref(NAV.STAFF, "/staff/marks")).toBe("/staff/marks");
+    expect(activeNavHref(NAV.STAFF, "/staff")).toBe("/staff");
+    expect(activeNavHref(NAV.STUDENT, "/grades")).toBe("/grades");
+    expect(activeNavHref(NAV.STUDENT, "/login")).toBeNull();
   });
 });
