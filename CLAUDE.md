@@ -112,6 +112,8 @@ app/api/staff/notifications/teachers/ подсказки «Преподават�
 app/api/teacher/groups/  подсказки групп преподавателя (getTeacherContext → 401; только его группы, ≤ 5)
 app/api/staff/notifications/groups/ подсказки групп для событий (getStaffContext → 401; свой факультет, ≤ 5)
 app/api/health/          состояние: база и миграции (без входа — только ok; подробности — деканату)
+app/api/client-log/      браузер сообщает о незагрузившихся файлах интерфейса → строка «[client] …» в логе сервера
+scripts/check-static.sh  проверка с сервера: все ли файлы /_next/static отдаются и нет ли двух версий кабинета
 instrumentation.ts       проверка базы и миграций при запуске сервера (громкое предупреждение в лог)
 lib/health.ts            checkHealth: доступна ли база, какие миграции этой версии не применены
 lib/actions/errors.ts    runAction — ошибки серверных действий в лог (без данных людей) и понятным текстом в форму
