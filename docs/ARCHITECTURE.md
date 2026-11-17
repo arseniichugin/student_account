@@ -1,6 +1,7 @@
 # Архитектура
 
 > Статус: **реализовано на этапе 2** (вход, сессии, разграничение доступа, заявки).
+> Обзор кода с картой страниц и рецептами — [`CODEBASE.md`](CODEBASE.md).
 > Этап 3: данные вуза из заменяемых файлов (`data/university/`), импорт, слой данных расписания.
 
 ## 1. Общая схема
@@ -60,7 +61,7 @@ PostgreSQL (через Prisma)
 Полная схема — `prisma/schema.prisma`. Кратко:
 
 ```
-User            id, login, passwordHash, role (STUDENT | STAFF), isDemo, createdAt
+User            id, login, passwordHash, role (STUDENT | STAFF | TEACHER), isDemo, createdAt
 Session         id, tokenHash (SHA-256 токена), userId, expiresAt, createdAt
 LoginAttempt    id, login, ip, success, createdAt   — для ограничения попыток
 
@@ -75,7 +76,7 @@ StudentGroup    studentId, groupId, position (1/2) — языковые груп
 Staff           id, userId, facultyId, fullName, position — по одному на факультет
 
 ── из schedule.csv и campus-map.json (расписание заменяется целиком) ──
-Teacher         id, oid (lecturerOid), shortName, fullName, rank?, email?
+Teacher         id, oid (lecturerOid), shortName, fullName, rank?, email?, userId? (аккаунт преподавателя, docs/TEACHERS.md)
 Building        id, key (id на карте), name, abbr?, address?, floors, wings?, maxRoom?, scheme?, onMap
 Room            id, number («4144», «Манеж-1»), buildingId?, type?, capacity?, floor?, wing?, purpose?,
                 bookable, onMap
@@ -89,7 +90,7 @@ LessonGroup     lessonId, groupId, date — лекция потока = одно
 ── демо-контент (prisma/seed.ts) и действия пользователей ──
 Grade           id, studentId, disciplineId, semester, kind (EXAM | CREDIT | COURSEWORK | MIDTERM), value?, date?
 Mark            id, studentId, lessonId? (SetNull), lessonOid, disciplineId, date, startTime, lessonKind,
-                value (1–5), createdById? → Staff, createdAt — оценка на занятии, их 0…N на занятие
+                value (1–5), createdById? → Staff, teacherId? → Teacher, createdAt — оценка на занятии, их 0…N на занятие
                 (подробно — docs/MARKS.md); импорт восстанавливает lessonId по lessonOid
 Deadline        id, groupId, disciplineId?, title, dueAt
 RequestType     id, code, name, description, etaDays
