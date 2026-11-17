@@ -6,9 +6,15 @@
  * Модуль без серверного и клиентского кода: его импортируют и guards (сервер), и меню (браузер).
  */
 
-export type NavIcon = "sun" | "calendar" | "map" | "file" | "user" | "inbox" | "chart" | "pen";
+export type NavIcon = "sun" | "calendar" | "map" | "file" | "user" | "inbox" | "chart" | "pen" | "bell";
 
-export type NavItem = { href: string; label: string; icon: NavIcon };
+export type NavItem = {
+  href: string;
+  label: string;
+  icon: NavIcon;
+  /** Число на пункте (непрочитанные уведомления) */
+  badge?: number;
+};
 
 export type NavRole = "STUDENT" | "STAFF";
 
@@ -24,6 +30,7 @@ export const NAV: Record<NavRole, NavItem[]> = {
   STAFF: [
     { href: "/staff", label: "Заявки", icon: "inbox" },
     { href: "/staff/marks", label: "Оценки", icon: "pen" },
+    { href: "/staff/notifications", label: "Уведомления", icon: "bell" },
     { href: "/schedule", label: "Расписание", icon: "calendar" },
     { href: "/map", label: "Карта", icon: "map" },
   ],

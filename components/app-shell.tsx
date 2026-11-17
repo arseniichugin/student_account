@@ -1,4 +1,4 @@
-import { LogOut } from "lucide-react";
+import { Bell, LogOut } from "lucide-react";
 import Link from "next/link";
 import { ConceptBadge } from "@/components/concept-badge";
 import { Logo } from "@/components/logo";
@@ -10,6 +10,9 @@ import { cn } from "@/lib/utils";
 
 export type ShellUser = { name: string; meta: string; initials: string };
 
+/** Колокольчик уведомлений (только у студента): куда ведёт и сколько непрочитанных. */
+export type ShellNotifications = { href: string; unread: number };
+
 /**
  * Оболочка кабинета.
  *  — телефон и планшет (< 1024 px): шапка сверху, навигация снизу;
@@ -19,11 +22,13 @@ export function AppShell({
   nav,
   user,
   homeHref,
+  notifications,
   children,
 }: {
   nav: NavItem[];
   user: ShellUser;
   homeHref: string;
+  notifications?: ShellNotifications;
   children: React.ReactNode;
 }) {
   const showBottomNav = nav.length > 1;
@@ -37,7 +42,15 @@ export function AppShell({
           </Link>
           <ConceptBadge className="mx-2 mt-3 self-start" />
           <nav className="mt-8" aria-label="Основная навигация">
-            <NavLinks items={nav} variant="side" />
+            {/* У студента в боковом меню — ещё «Уведомления» с числом непрочитанных (в нижней панели места нет: там колокольчик в шапке) */}
+            <NavLinks
+              items={
+                notifications
+                  ? [...nav, { href: notifications.href, label: "Уведомления", icon: "bell", badge: notifications.unread }]
+                  : nav
+              }
+              variant="side"
+            />
           </nav>
           <div className="mt-auto flex items-center gap-3 rounded-2xl bg-surface-muted p-3">
             <span
@@ -65,6 +78,7 @@ export function AppShell({
             <ConceptBadge className="hidden sm:inline-flex" />
             <div className="ml-auto flex items-center gap-1">
               <span className="hidden max-w-56 truncate text-sm text-muted md:block">{user.name}</span>
+              {notifications && <BellButton {...notifications} />}
               <LogoutButton />
             </div>
           </div>
@@ -87,6 +101,27 @@ export function AppShell({
         </nav>
       )}
     </div>
+  );
+}
+
+function BellButton({ href, unread }: ShellNotifications) {
+  return (
+    <Link
+      href={href}
+      aria-label={unread > 0 ? `Уведомления: непрочитанных ${unread}` : "Уведомления"}
+      title="Уведомления"
+      className="relative flex size-11 items-center justify-center rounded-xl text-muted hover:bg-border/60 hover:text-text"
+    >
+      <Bell className="size-5" aria-hidden />
+      {unread > 0 && (
+        <span
+          className="absolute top-1.5 right-1 min-w-[18px] rounded-full bg-danger px-1 text-center text-[11px] leading-[18px] font-semibold text-on-primary"
+          aria-hidden
+        >
+          {unread > 99 ? "99+" : unread}
+        </span>
+      )}
+    </Link>
   );
 }
 

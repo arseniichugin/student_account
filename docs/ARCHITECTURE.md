@@ -96,8 +96,10 @@ RequestType     id, code, name, description, etaDays
 Request         id, studentId, typeId, payload (JSON),
                 status (SUBMITTED | IN_PROGRESS | READY | ISSUED | REJECTED),
                 staffComment?, createdAt, updatedAt
-Announcement    id, authorId, title, body, facultyId? / course? / groupId? (аудитория), publishedAt
-Notification    id, userId, type, title, body, link?, readAt?, createdAt
+Announcement    id, authorId, kind (тип уведомления), title, body, facultyId? / course? / groupId? (аудитория),
+                publishedAt (время отправки, может быть в будущем), createdAt — событие деканата (docs/NOTIFICATIONS.md)
+Notification    id, userId, type (ANNOUNCEMENT | SCHEDULE_CHANGE | REQUEST_STATUS | DEADLINE | EXAM), title, body,
+                link?, readAt?, createdAt (с этого момента видно получателю), announcementId? (каскад)
 ```
 
 - **Карта кампуса** (`/map`) читает `campus-map.json` напрямую (`lib/campus-map/load.ts`) при каждом запросе —
