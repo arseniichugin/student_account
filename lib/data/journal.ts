@@ -252,6 +252,9 @@ export async function listGroupDisciplineOptions(ctx: StaffContext, groupId: str
 
 /** Студенты группы своего факультета (для формы поиска деканата). */
 export async function listGroupStudentOptions(ctx: StaffContext, groupId: string): Promise<Option[]> {
+  // группа — только своего факультета (защита не должна зависеть от вызывающего кода)
+  const group = await db.group.findFirst({ where: { id: groupId, facultyId: ctx.facultyId }, select: { id: true } });
+  if (!group) return [];
   const rows = await db.student.findMany({
     where: {
       facultyId: ctx.facultyId,
