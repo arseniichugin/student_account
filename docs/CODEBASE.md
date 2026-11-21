@@ -362,6 +362,8 @@ npm run lint && npm run typecheck && npm test
 | `COOKIE_SECURE` | `false` — только для проверки продакшен-сборки по http://localhost | — |
 | `TRUST_PROXY` | `1` — только за своим Caddy/nginx с `X-Real-IP` | выключен |
 
+`ALLOWED_DEV_ORIGINS` — только для `npm run dev` с адреса не `localhost` (IP, домен; через запятую). На сервере — production, см. `DEPLOYMENT.md` §7.
+
 ## 14. Частые ошибки и подводные камни
 
 | Симптом / соблазн | Как правильно |

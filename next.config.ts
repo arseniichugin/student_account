@@ -41,6 +41,13 @@ const nextConfig: NextConfig = {
   // (иначе после обновления сервера кнопки «Сохранить» молча не работают до ручной перезагрузки).
   // Задаётся при сборке: Dockerfile и .devcontainer/start.sh. Без переменной — поведение по умолчанию.
   deploymentId: process.env.DEPLOYMENT_VERSION || undefined,
+  // Только для режима разработки (npm run dev): с каких адресов, кроме localhost, можно открывать сервер.
+  // Без этого Next.js не отдаёт браузеру служебные файлы — страница не «оживает» (кнопки и подсказки не работают).
+  // Пример: ALLOWED_DEV_ORIGINS=194.87.234.51,cabinet.example.ru (без https:// и порта). На сервере лучше production.
+  allowedDevOrigins: (process.env.ALLOWED_DEV_ORIGINS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
   env: { EXPECTED_MIGRATIONS: migrationNames(), BUILD_VERSION: process.env.DEPLOYMENT_VERSION || "" },
   poweredByHeader: false,
   // Дополнительные адреса, с которых можно отправлять формы (серверные действия).

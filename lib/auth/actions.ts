@@ -1,7 +1,8 @@
 "use server";
 
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
+import { errorSummary } from "@/lib/actions/errors";
 import { db } from "@/lib/db";
 import { getDummyHash, verifyPassword } from "@/lib/auth/password";
 import { isLoginRateLimited, markLoginAttemptSuccessful, startLoginAttempt } from "@/lib/auth/rate-limit";
@@ -21,7 +22,26 @@ async function clientIp(): Promise<string> {
   return h.get("x-real-ip")?.trim() || "unknown";
 }
 
-export async function loginAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
+export async function loginAction(prev: LoginState, formData: FormData): Promise<LoginState> {
+  // Сбой базы (не подготовлена, недоступна) — понятное сообщение в форме вместо страницы ошибки 500.
+  // Подробности — в логе сервера (без логина и пароля).
+  try {
+    return await login(prev, formData);
+  } catch (e) {
+    unstable_rethrow(e); // redirect("/") после успешного входа — не ошибка
+    const err = e as { code?: string; message?: string };
+    console.error(`[login] ${errorSummary(e)}`);
+    const notReady = /P2021|P2022|does not exist|TableDoesNotExist|ColumnNotFound/i.test(`${err.code} ${err.message}`);
+    return {
+      error: notReady
+        ? "Вход временно недоступен: кабинет ещё не готов к работе. Попробуйте позже." // подсказка администратору — в логе при запуске
+        : "Вход временно недоступен из-за ошибки на сервере. Попробуйте позже; если повторяется — сообщите администратору.",
+      login: String(formData.get("login") ?? "").slice(0, 64),
+    };
+  }
+}
+
+async function login(_prev: LoginState, formData: FormData): Promise<LoginState> {
   const parsed = loginSchema.safeParse({
     login: formData.get("login"),
     password: formData.get("password"),
