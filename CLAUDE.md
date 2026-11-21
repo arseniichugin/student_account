@@ -110,9 +110,6 @@ app/(app)/notifications/ входящие уведомления — студе�
 app/(app)/schedule/      расписание группы/преподавателя — обе роли (requireUser)
 app/(app)/map/           карта кампуса — обе роли (requireUser)
 app/api/schedule/search/ подсказки поиска (getUserContext → 401 без сессии; студентов не возвращает)
-app/api/staff/notifications/teachers/ подсказки «Преподавателю…» (getStaffContext → 401; ведущие у факультета, ≤ 5)
-app/api/teacher/groups/  подсказки групп преподавателя (getTeacherContext → 401; только его группы, ≤ 5)
-app/api/staff/notifications/groups/ подсказки групп для событий (getStaffContext → 401; свой факультет, ≤ 5)
 app/api/health/          состояние: база и миграции (без входа — только ok; подробности — деканату)
 app/api/client-log/      браузер сообщает о незагрузившихся файлах интерфейса → строка «[client] …» в логе сервера
 scripts/check-static.sh  проверка с сервера: все ли файлы /_next/static отдаются и нет ли двух версий кабинета
@@ -143,7 +140,6 @@ lib/safe-url.ts          safeExternalUrl — в ссылку попадает т
 lib/config.ts            UNIVERSITY_NAME (название вуза, env), isDemoMode()
 lib/requests/status.ts   подписи статусов заявок (годится и клиенту)
 components/ui/           базовые компоненты (Button, Input, Card, EmptyState, Skeleton…)
-components/ui/combobox.tsx  поле с подсказками при наборе (до 5 вариантов)
 components/schedule/     LessonCard / LessonList, неделя, навигация по датам, поиск, скелетоны
 components/campus-map/   обёртка карты кампуса для React (грузит public/campus-map/)
 public/campus-map/       карта кампуса без зависимостей (campus-map.js / .css) — уходит в браузер

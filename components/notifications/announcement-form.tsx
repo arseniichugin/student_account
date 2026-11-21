@@ -2,7 +2,6 @@
 
 import { startTransition, useActionState, useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Combobox, type ComboboxItem } from "@/components/ui/combobox";
 import { FormMessage, Input, Label, Select, Textarea } from "@/components/ui/form";
 import {
   NOTIFICATION_KIND_LABEL,
@@ -25,6 +24,8 @@ export function AnnouncementForm({
   students,
   teachers = 0,
   courses = [],
+  groups = [],
+  teacherChoices = [],
   minSendAt,
 }: {
   mode: "staff" | "teacher";
@@ -33,6 +34,10 @@ export function AnnouncementForm({
   /** Деканат: преподавателей, ведущих занятия у факультета */
   teachers?: number;
   courses?: { course: number; students: number }[];
+  /** Группы для «Отправить группе…» (group — подпись курса для группировки в списке) */
+  groups?: { id: string; label: string; group?: string }[];
+  /** Преподаватели для «Преподавателю…» (только деканат) */
+  teacherChoices?: { id: string; label: string }[];
   /** «YYYY-MM-DDTHH:MM» — сейчас по Москве (нижняя граница поля времени) */
   minSendAt: string;
 }) {
@@ -46,9 +51,7 @@ export function AnnouncementForm({
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [audience, setAudience] = useState<AudienceType>(staff ? "faculty" : "myGroups");
-  const [teacher, setTeacher] = useState<ComboboxItem | null>(null);
   const [course, setCourse] = useState(String(courses[0]?.course ?? ""));
-  const [group, setGroup] = useState<ComboboxItem | null>(null);
   const [when, setWhen] = useState<"now" | "later">("now");
   const [sendAt, setSendAt] = useState("");
 
@@ -191,35 +194,47 @@ export function AnnouncementForm({
             {fieldError("course")}
           </div>
         )}
-        {audience === "group" && (
-          <div className="mt-3">
-            <Combobox
-              label="Группа"
-              name="groupId"
-              placeholder="Например: 1-ГР-1"
-              url={(q) => `${staff ? "/api/staff/notifications/groups" : "/api/teacher/groups"}?${new URLSearchParams({ q })}`}
-              value={group}
-              onChange={setGroup}
-              emptyText={staff ? "На вашем факультете такой группы нет" : "Среди ваших групп такой нет"}
-              invalid={!!err.groupId}
-              errorId={`${id}-groupId-error`}
-            />
-            {fieldError("groupId")}
-          </div>
-        )}
-        {audience === "teacher" && (
-          <div className="mt-3">
-            <Combobox
-              label="Преподаватель"
+        {/* Группа и преподаватель — обычные выпадающие списки, заполненные на сервере (как курс):
+            показываются через CSS и работают без JavaScript */}
+        <div className="mt-3 hidden group-has-[[value=group]:checked]/aud:block">
+          <Label htmlFor={`${id}-group`}>Группа</Label>
+          <Select
+            id={`${id}-group`}
+            name="groupId"
+            defaultValue=""
+            aria-invalid={!!err.groupId}
+            aria-describedby={describedBy("groupId")}
+          >
+            <option value="">{groups.length ? "Выберите группу" : "Групп нет"}</option>
+            {groupByCourse(groups).map(([course, items]) => (
+              <optgroup key={course} label={course}>
+                {items.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </Select>
+          {fieldError("groupId")}
+        </div>
+        {staff && (
+          <div className="mt-3 hidden group-has-[[value=teacher]:checked]/aud:block">
+            <Label htmlFor={`${id}-teacher`}>Преподаватель</Label>
+            <Select
+              id={`${id}-teacher`}
               name="teacherId"
-              placeholder="Фамилия преподавателя"
-              url={(q) => `/api/staff/notifications/teachers?${new URLSearchParams({ q })}`}
-              value={teacher}
-              onChange={setTeacher}
-              emptyText="Такой преподаватель не ведёт занятия у вашего факультета"
-              invalid={!!err.teacherId}
-              errorId={`${id}-teacherId-error`}
-            />
+              defaultValue=""
+              aria-invalid={!!err.teacherId}
+              aria-describedby={describedBy("teacherId")}
+            >
+              <option value="">{teacherChoices.length ? "Выберите преподавателя" : "Преподавателей нет"}</option>
+              {teacherChoices.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label}
+                </option>
+              ))}
+            </Select>
             {fieldError("teacherId")}
           </div>
         )}
@@ -291,4 +306,14 @@ function Chip({
       </span>
     </label>
   );
+}
+
+/** Группы списка по курсам — для <optgroup>. */
+function groupByCourse<T extends { group?: string }>(items: T[]): [string, T[]][] {
+  const map = new Map<string, T[]>();
+  for (const i of items) {
+    const key = i.group ?? "Группы";
+    map.set(key, [...(map.get(key) ?? []), i]);
+  }
+  return [...map.entries()];
 }

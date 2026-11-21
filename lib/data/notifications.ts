@@ -455,3 +455,48 @@ export async function markMyNotificationsRead(ctx: RecipientContext, now: Date =
   });
   return count;
 }
+
+// ─── Полные списки для выпадающих полей формы (без подсказок при наборе — работают и без JavaScript) ─
+
+export type Choice = { id: string; label: string; group?: string };
+
+/** Группы своего факультета со студентами — для «Отправить группе…» деканата; group — подпись курса. */
+export async function listFacultyGroupChoices(ctx: StaffContext): Promise<Choice[]> {
+  const rows = await db.group.findMany({
+    where: {
+      facultyId: ctx.facultyId,
+      OR: [{ students: { some: { facultyId: ctx.facultyId } } }, { members: { some: { student: { facultyId: ctx.facultyId } } } }],
+    },
+    orderBy: [{ course: "asc" }, { kind: "asc" }, { name: "asc" }],
+    select: { id: true, name: true, kind: true, course: true },
+  });
+  return rows.map((g) => ({
+    id: g.id,
+    label: g.kind === "LANGUAGE" ? `${g.name} (языковая)` : g.name,
+    group: g.course ? `${g.course} курс` : "Другие группы",
+  }));
+}
+
+/** Преподаватели, которые ведут занятия у групп факультета, — для «Преподавателю…». */
+export async function listFacultyTeacherChoices(ctx: StaffContext): Promise<Choice[]> {
+  const rows = await db.teacher.findMany({
+    where: facultyTeachersWhere(ctx.facultyId),
+    orderBy: { shortName: "asc" },
+    select: { id: true, shortName: true, rank: true },
+  });
+  return rows.map((t) => ({ id: t.id, label: t.rank ? `${t.shortName} — ${t.rank}` : t.shortName }));
+}
+
+/** Группы преподавателя — для его «Отправить группе…». */
+export async function listTeacherGroupChoices(ctx: TeacherContext): Promise<Choice[]> {
+  const rows = await db.group.findMany({
+    where: { id: { in: await teacherGroupIds(ctx.teacherId) } },
+    orderBy: [{ course: "asc" }, { name: "asc" }],
+    select: { id: true, name: true, kind: true, course: true },
+  });
+  return rows.map((g) => ({
+    id: g.id,
+    label: g.kind === "LANGUAGE" ? `${g.name} (языковая)` : g.name,
+    group: g.course ? `${g.course} курс` : "Другие группы",
+  }));
+}

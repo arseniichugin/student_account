@@ -46,7 +46,7 @@ export const createAnnouncementSchema = z
 
 export type CreateAnnouncementForm = z.infer<typeof createAnnouncementSchema>;
 
-/** GET /api/staff/notifications/groups?q=…, /api/staff/notifications/teachers?q=…, /api/teacher/groups?q=… */
+/** Запрос подсказок групп/преподавателей (используется функциями suggest… в тестах и для будущих API). */
 export const groupSuggestSchema = z.object({ q: z.string().trim().max(64).default("") });
 
 export const deleteAnnouncementSchema = z.object({ announcementId: z.string().trim().min(1).max(64) });

@@ -8,7 +8,12 @@ import { SentAnnouncements } from "@/components/notifications/sent-list";
 import { Card, CardTitle } from "@/components/ui/card";
 import { requireTeacher } from "@/lib/auth/guards";
 import { isDemoMode } from "@/lib/config";
-import { announcementsPerHourLimit, countTeacherStudents, listTeacherAnnouncements } from "@/lib/data/notifications";
+import {
+  announcementsPerHourLimit,
+  countTeacherStudents,
+  listTeacherAnnouncements,
+  listTeacherGroupChoices,
+} from "@/lib/data/notifications";
 import { getMyTeacherProfile } from "@/lib/data/teacher";
 import { moscowNowTime, moscowToday } from "@/lib/moscow-time";
 
@@ -17,10 +22,11 @@ export const metadata: Metadata = { title: "Рассылка группам" };
 export default async function TeacherNotificationsPage() {
   const ctx = await requireTeacher();
   const now = new Date();
-  const [profile, announcements, students] = await Promise.all([
+  const [profile, announcements, students, groups] = await Promise.all([
     getMyTeacherProfile(ctx),
     listTeacherAnnouncements(ctx, now),
     countTeacherStudents(ctx),
+    listTeacherGroupChoices(ctx),
   ]);
 
   if (profile.groups.length === 0) {
@@ -55,7 +61,7 @@ export default async function TeacherNotificationsPage() {
             Сообщение получат студенты ваших групп — в разделе «Уведомления», с отметкой на колокольчике.
             {isDemoMode() && ` На демо-стенде — не больше ${announcementsPerHourLimit()} событий в час.`}
           </p>
-          <AnnouncementForm mode="teacher" students={students} minSendAt={`${moscowToday(now)}T${moscowNowTime(now)}`} />
+          <AnnouncementForm mode="teacher" students={students} groups={groups} minSendAt={`${moscowToday(now)}T${moscowNowTime(now)}`} />
         </Card>
         <SentAnnouncements items={announcements} mode="teacher" />
       </div>

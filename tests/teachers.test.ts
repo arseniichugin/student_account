@@ -22,6 +22,7 @@ import {
   listFacultyAnnouncements,
   listMyNotifications,
   suggestFacultyTeachers,
+  listTeacherGroupChoices,
   suggestTeacherGroups,
   teacherGroupIds,
 } from "@/lib/data/notifications";
@@ -205,6 +206,9 @@ describe("Уведомления преподавателя", () => {
     });
     expect(faculty.ok).toBe(false);
     expect((await suggestTeacherGroups(teacher, "")).every((g) => groups.includes(g.id))).toBe(true);
+    // выпадающий список «Группа» у преподавателя — ровно его группы
+    const choices = await listTeacherGroupChoices(teacher);
+    expect(choices.map((c) => c.id).sort()).toEqual([...groups].sort());
   });
 
   it("событие преподавателя не видно и не удаляется деканатом; другой преподаватель его не удалит", async () => {

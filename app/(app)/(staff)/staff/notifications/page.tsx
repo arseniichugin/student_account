@@ -10,6 +10,8 @@ import {
   countFacultyTeachers,
   listFacultyAnnouncements,
   listFacultyCourses,
+  listFacultyGroupChoices,
+  listFacultyTeacherChoices,
 } from "@/lib/data/notifications";
 import { getMyStaffProfile } from "@/lib/data/profile";
 import { moscowNowTime, moscowToday } from "@/lib/moscow-time";
@@ -19,12 +21,14 @@ export const metadata: Metadata = { title: "Уведомления" };
 export default async function StaffNotificationsPage() {
   const ctx = await requireStaff();
   const now = new Date();
-  const [profile, announcements, courses, students, teachers] = await Promise.all([
+  const [profile, announcements, courses, students, teachers, groups, teacherChoices] = await Promise.all([
     getMyStaffProfile(ctx),
     listFacultyAnnouncements(ctx, now),
     listFacultyCourses(ctx),
     countFacultyStudents(ctx),
     countFacultyTeachers(ctx),
+    listFacultyGroupChoices(ctx),
+    listFacultyTeacherChoices(ctx),
   ]);
 
   return (
@@ -47,6 +51,8 @@ export default async function StaffNotificationsPage() {
             students={students}
             teachers={teachers}
             courses={courses}
+            groups={groups}
+            teacherChoices={teacherChoices}
             minSendAt={`${moscowToday(now)}T${moscowNowTime(now)}`}
           />
         </Card>

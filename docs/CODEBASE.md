@@ -196,9 +196,6 @@ Layout-ы групп `(student)`, `(staff)`, `(teacher)` — дополните�
 | Маршрут | Контекст | Что возвращает |
 |---|---|---|
 | `GET /api/schedule/search?q=` | `getUserContext` | группы и преподаватели для поиска расписания (студентов не возвращает) |
-| `GET /api/staff/notifications/groups?q=` | `getStaffContext` | группы своего факультета, ≤ 5 |
-| `GET /api/staff/notifications/teachers?q=` | `getStaffContext` | преподаватели, ведущие у факультета, ≤ 5 |
-| `GET /api/teacher/groups?q=` | `getTeacherContext` | только свои группы, ≤ 5 |
 | `GET /api/health` | без входа — только `ok`; деканату — подробности | состояние базы и миграций (`lib/health.ts`) |
 | `POST /api/client-log` | — | браузер сообщает о незагрузившихся файлах → строка `[client] …` в логе |
 

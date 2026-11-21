@@ -11,6 +11,8 @@ import {
   createFacultyAnnouncement,
   deleteFacultyAnnouncement,
   listFacultyAnnouncements,
+  listFacultyGroupChoices,
+  listFacultyTeacherChoices,
   listMyNotifications,
   markMyNotificationsRead,
   suggestFacultyGroups,
@@ -178,5 +180,21 @@ describe("События деканата: получатели и видимо�
     const mine = await listMyNotifications(rcpt(studentA));
     const foreign = await db.notification.count({ where: { id: { in: mine.map((n) => n.id) }, userId: { not: studentA.userId } } });
     expect(foreign).toBe(0);
+  });
+});
+
+describe("Выпадающие списки формы: группы и преподаватели", () => {
+  it("деканату — только группы своего факультета (с подписью курса) и преподаватели, ведущие у факультета", async () => {
+    const groups = await listFacultyGroupChoices(staffA);
+    expect(groups.length).toBeGreaterThan(0);
+    const dbGroups = await db.group.findMany({ where: { id: { in: groups.map((g) => g.id) } }, select: { facultyId: true } });
+    expect(dbGroups.every((g) => g.facultyId === facultyA)).toBe(true);
+    expect(groups.some((g) => g.id === groupB)).toBe(false);
+    expect(groups.every((g) => !!g.group)).toBe(true);
+
+    const teachers = await listFacultyTeacherChoices(staffA);
+    expect(teachers.length).toBe(
+      await db.teacher.count({ where: { userId: { not: null }, lessons: { some: { groups: { some: { group: { facultyId: facultyA } } } } } } }),
+    );
   });
 });
