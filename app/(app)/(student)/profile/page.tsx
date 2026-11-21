@@ -43,7 +43,7 @@ export default async function ProfilePage() {
               ]}
             />
           </Card>
-          <AboutCard data={about} />
+          <AboutCard data={about} note="Этот текст видите только вы." />
         </div>
 
         <PasswordCard lock={passwordLock} />

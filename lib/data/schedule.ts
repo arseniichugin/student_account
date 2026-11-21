@@ -1,4 +1,5 @@
 import "server-only";
+import { isDemoMode } from "@/lib/config";
 import { db } from "@/lib/db";
 import type { StudentContext, UserContext } from "@/lib/auth/guards";
 import type { LessonStatus, Prisma } from "@/lib/generated/prisma/client";
@@ -314,10 +315,13 @@ export async function getTeacherSchedule(
   const row = await db.teacher.findUnique({
     where: { id: teacherId },
     // «О себе» — текст, который преподаватель сам разместил для студентов (профиль /teacher/profile)
-    select: { id: true, shortName: true, fullName: true, rank: true, email: true, user: { select: { about: true } } },
+    select: { id: true, shortName: true, fullName: true, rank: true, email: true, user: { select: { about: true, isDemo: true } } },
   });
   if (!row) return null;
   const { user, ...teacher } = row;
   const rows = await findLessons({ teacherId, date });
-  return { teacher, about: user?.about ?? null, lessons: rows.map(toLesson) };
+  // На демо-стенде «О себе» общего тестового аккаунта не показываем другим: любой посетитель может его изменить
+  // (замечание security-reviewer). У обычных преподавателей — показываем.
+  const about = user && !(user.isDemo && isDemoMode()) ? user.about : null;
+  return { teacher, about, lessons: rows.map(toLesson) };
 }

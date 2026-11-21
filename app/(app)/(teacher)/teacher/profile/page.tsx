@@ -51,7 +51,9 @@ export default async function TeacherProfilePage() {
             data={about}
             note={
               <>
-                Текст видят студенты и деканат на странице вашего расписания.{" "}
+                {about.shared === "demo-mode"
+                  ? "На демо-стенде текст общего тестового аккаунта студентам не показывается — у обычных преподавателей его видят на странице расписания."
+                  : "Текст видят студенты и деканат на странице вашего расписания."}{" "}
                 <Link href={`/schedule?teacher=${encodeURIComponent(p.id)}`} className="inline-flex min-h-11 items-center font-medium text-primary">
                   Как это выглядит
                 </Link>

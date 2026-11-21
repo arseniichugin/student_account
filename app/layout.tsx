@@ -59,7 +59,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           dangerouslySetInnerHTML={{
             __html:
               '<div class="mx-auto flex max-w-3xl flex-wrap items-center gap-x-3 gap-y-1">' +
-              '<p class="min-w-0 flex-1">Страница загрузилась не полностью — подсказки и кнопки могут не работать. Если повторяется, сообщите администратору: причина записана в журнале сервера.</p>' +
+              '<p class="min-w-0 basis-full sm:basis-0 sm:flex-1">Страница загрузилась не полностью — подсказки и кнопки могут не работать. Если повторяется, сообщите администратору: причина записана в журнале сервера.</p>' +
               '<button type="button" onclick="location.reload()" class="min-h-11 rounded-xl px-3 font-semibold underline">Обновить страницу</button>' +
               '<button type="button" onclick="this.closest(\'#hydration-warning\').hidden=true" aria-label="Закрыть предупреждение" class="flex size-11 items-center justify-center rounded-xl text-lg">×</button>' +
               "</div>",

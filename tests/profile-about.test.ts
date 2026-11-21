@@ -191,6 +191,19 @@ describe("«О себе»: только своё", () => {
     const res = await getTeacherSchedule(userCtx(student), t.id, "2026-11-16", "2026-11-22");
     expect(res?.about).toBe("Консультации по средам");
   });
+
+  it("на демо-стенде «О себе» общего тестового преподавателя в расписании не показывается", async () => {
+    const demo = await db.teacher.findFirstOrThrow({ where: { user: { isDemo: true } }, select: { id: true, user: { select: { about: true } } } });
+    const prev = process.env.DEMO_MODE;
+    process.env.DEMO_MODE = "1";
+    try {
+      const res = await getTeacherSchedule(userCtx(student), demo.id, "2026-11-16", "2026-11-22");
+      expect(res?.about).toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env.DEMO_MODE;
+      else process.env.DEMO_MODE = prev;
+    }
+  });
 });
 
 describe("«О себе»: ограничение частоты", () => {

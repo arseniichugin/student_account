@@ -23,15 +23,14 @@ export function AboutCard({ data, note }: { data: MyAbout; /** Кто увиди
           <MessageSquareText className="mt-0.5 size-5 shrink-0 text-muted" aria-hidden />
           <div className="min-w-0">
             <p className="font-medium">Пока ничего не рассказали о себе</p>
-            <p className="mt-0.5 text-sm text-muted">Несколько строк о себе помогут однокурсникам, преподавателям и деканату.</p>
+            <p className="mt-0.5 text-sm text-muted">Несколько строк о себе: чем занимаетесь, как с вами связаться.</p>
           </div>
         </div>
       )}
       {note && <p className="mt-2 text-sm text-muted">{note}</p>}
       {data.shared && (
         <p className="mt-3 text-sm text-muted">
-          {data.shared === "demo-mode" ? "Демо-версия: текст могут увидеть другие посетители." : "Это тестовый аккаунт: текст увидят все посетители."}{" "}
-          Сохранять можно до {data.limitPerHour} раз в час.
+          Это общий тестовый аккаунт: текст видят все, кто под ним входит. Сохранять можно до {data.limitPerHour} раз в час.
         </p>
       )}
       <AboutForm initial={data.about ?? ""} empty={!data.about} />

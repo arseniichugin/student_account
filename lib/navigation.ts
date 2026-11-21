@@ -31,7 +31,7 @@ export const NAV: Record<NavRole, NavItem[]> = {
     { href: "/staff", label: "Заявки", icon: "inbox" },
     { href: "/staff/marks", label: "Оценки", icon: "pen" },
     // «Рассылка», а не «Уведомления»: 6 пунктов на 360 px — длинная подпись обрезалась (как у преподавателя)
-    { href: "/staff/notifications", label: "Рассылка", icon: "bell" },
+    { href: "/staff/notifications", label: "Рассылка", icon: "send" },
     { href: "/schedule", label: "Расписание", icon: "calendar" },
     { href: "/map", label: "Карта", icon: "map" },
     { href: "/staff/profile", label: "Профиль", icon: "user" },
