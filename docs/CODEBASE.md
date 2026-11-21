@@ -168,7 +168,7 @@ db.request.findFirst({ where: { id, studentId: ctx.studentId } })
 | `/requests`, `/requests/new`, `/requests/[id]` | `app/(app)/(student)/requests/` | `requireStudent` | requests | PRD §5.5 |
 | `/profile` | `app/(app)/(student)/profile/` | `requireStudent` | profile, account | PRD §5.1 |
 | `/staff` | `app/(app)/(staff)/staff/` | `requireStaff` | requests, profile | PRD §5.7 |
-| `/staff/marks` | `app/(app)/(staff)/staff/marks/` | `requireStaff` | marks | MARKS.md |
+| `/staff/marks` | `app/(app)/(staff)/staff/marks/` — `?view=form` (курс → группа → студент → предмет → дата) или `?view=table` (журнал) | `requireStaff` | journal, marks | MARKS.md |
 | `/staff/notifications` | `app/(app)/(staff)/staff/notifications/` | `requireStaff` | notifications | NOTIFICATIONS.md |
 | `/teacher/marks` | `app/(app)/(teacher)/teacher/marks/` — журнал (студенты × занятия, оценки и посещаемость; без клиентского JS) | `requireTeacher` | journal, marks, teacher | TEACHERS.md |
 | `/teacher/notifications` | `app/(app)/(teacher)/teacher/notifications/` | `requireTeacher` | notifications, teacher | TEACHERS.md |
@@ -188,16 +188,14 @@ Layout-ы групп `(student)`, `(staff)`, `(teacher)` — дополните�
 | `app/(app)/(student)/grades/actions.ts` | `markMarksSeenAction` | `requireStudent` |
 | `app/(app)/(staff)/staff/actions.ts` | `updateStatusAction` — смена статуса заявки | `requireStaff` |
 | `app/(app)/notifications/actions.ts` | `markNotificationsReadAction` | `requireRecipient` |
-| `lib/marks/form-actions.ts` | `createMarkAction`, `deleteMarkAction` | деканат **или** преподаватель |
 | `lib/notifications/form-actions.ts` | создать/удалить событие деканата и преподавателя | `requireStaff` / `requireTeacher` |
-| `lib/journal/actions.ts` | `addJournalMarkAction`, `removeJournalMarkAction`, `setJournalAttendanceAction` — обычные формы, `redirect` обратно, ошибка кодом `?msg=` | `requireTeacher` |
+| `lib/journal/actions.ts` | `addJournalMarkAction`, `removeJournalMarkAction` (деканат **или** преподаватель), `setJournalAttendanceAction` (преподаватель) — обычные формы, `redirect` обратно, ошибка кодом `?msg=`, успех `?ok=1` | Grader / `requireTeacher` |
 
 ### API
 
 | Маршрут | Контекст | Что возвращает |
 |---|---|---|
 | `GET /api/schedule/search?q=` | `getUserContext` | группы и преподаватели для поиска расписания (студентов не возвращает) |
-| `GET /api/marks/suggest` | `getStaffContext` или `getTeacherContext` | студенты/дисциплины/занятия для ввода оценки, ≤ 5 |
 | `GET /api/staff/notifications/groups?q=` | `getStaffContext` | группы своего факультета, ≤ 5 |
 | `GET /api/staff/notifications/teachers?q=` | `getStaffContext` | преподаватели, ведущие у факультета, ≤ 5 |
 | `GET /api/teacher/groups?q=` | `getTeacherContext` | только свои группы, ≤ 5 |
@@ -218,7 +216,7 @@ Layout-ы групп `(student)`, `(staff)`, `(teacher)` — дополните�
 | `notifications.ts` | `createFacultyAnnouncement`, `createTeacherAnnouncement`, `list…Announcements`, `delete…Announcement`, `suggest…`, счётчики аудитории · `listMyNotifications`, `countMyUnreadNotifications`, `markMyNotificationsRead` | Staff · Teacher · Recipient |
 | `profile.ts` | `getMyStudentProfile`, `getMyStaffProfile` | Student · Staff |
 | `teacher.ts` | `getMyTeacherProfile` | Teacher |
-| `journal.ts` | `listTeacherClasses`, `getTeacherJournal`, `setTeacherAttendance` | Teacher |
+| `journal.ts` | `listTeacherClasses`, `getJournal` (деканат и преподаватель), `setTeacherAttendance` · `listFacultyGroupOptions`, `listGroupDisciplineOptions`, `listGroupStudentOptions` | Grader · Teacher · Staff |
 | `account.ts` | `getPasswordChangeLock`, `changeMyPassword` | userId из сессии |
 
 Ограничения частоты (защита от спама) живут рядом с функциями записи:

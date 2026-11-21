@@ -423,3 +423,41 @@ export async function deleteMark(ctx: Grader, markId: string): Promise<boolean> 
   const { count } = await db.mark.deleteMany({ where });
   return count > 0;
 }
+
+// ─── Полные списки для формы поиска деканата (выпадающие списки, без ограничения в 5) ─
+
+/** Все предметы, по которым у доступного студента были занятия. */
+export async function listGradableDisciplines(ctx: Grader, studentId: string, today: string = moscowToday()) {
+  const student = await gradableStudent(ctx, studentId);
+  if (!student) return [];
+  const rows = await db.discipline.findMany({
+    where: { lessons: { some: gradableLessonsWhere(ctx, student.groupIds, today) } },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, _count: { select: { marks: { where: { studentId } } } } },
+  });
+  return rows.map((d) => ({ id: d.id, label: d.name, meta: d._count.marks ? `оценок: ${d._count.marks}` : undefined }));
+}
+
+/** Прошедшие занятия студента по предмету, сначала последние (не больше 60), с уже выставленными оценками. */
+export async function listGradableLessons(ctx: Grader, studentId: string, disciplineId: string, today: string = moscowToday()) {
+  const student = await gradableStudent(ctx, studentId);
+  if (!student) return [];
+  const rows = await db.lesson.findMany({
+    where: { disciplineId, ...gradableLessonsWhere(ctx, student.groupIds, today) },
+    orderBy: [{ date: "desc" }, { startTime: "desc" }],
+    take: 60,
+    select: {
+      id: true,
+      date: true,
+      startTime: true,
+      kind: true,
+      marks: { where: { studentId }, orderBy: { createdAt: "asc" }, select: { id: true, value: true, createdById: true } },
+    },
+  });
+  return rows.map((l) => ({
+    id: l.id,
+    label: `${ruDate(dbDateToIso(l.date))}, ${l.startTime} · ${l.kind}`,
+    meta: l.marks.length ? `уже: ${l.marks.map((m) => m.value).join(", ")}` : undefined,
+    marks: l.marks,
+  }));
+}

@@ -141,7 +141,7 @@ export function AnnouncementForm({
         <div className="flex flex-wrap gap-2">
           {(staff
             ? ([
-                ["faculty", `Отправить всем (${students})`],
+                ["faculty", `Отправить всем (${students + teachers})`],
                 ["course", "Отправить курсу…"],
                 ["group", "Отправить группе…"],
                 ["allTeachers", `Всем преподавателям (${teachers})`],
@@ -158,7 +158,8 @@ export function AnnouncementForm({
           ))}
         </div>
         <p className="mt-1.5 text-sm text-muted">
-          {audience === "faculty" && "Все студенты вашего факультета."}
+          {audience === "faculty" &&
+            `Все студенты вашего факультета (${students}) и преподаватели, которые ведут у него занятия (${teachers}).`}
           {audience === "course" && "Все студенты выбранного курса вашего факультета."}
           {audience === "group" &&
             (staff

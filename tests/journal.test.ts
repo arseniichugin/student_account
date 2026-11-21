@@ -4,9 +4,20 @@
  * Нужна заполненная база: npm run db:setup.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { TeacherContext } from "@/lib/auth/guards";
+import type { StaffContext, TeacherContext } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
-import { JOURNAL_RECENT_LESSONS, getTeacherJournal, listTeacherClasses, setTeacherAttendance } from "@/lib/data/journal";
+import {
+  JOURNAL_RECENT_LESSONS,
+  getJournal,
+  getTeacherJournal,
+  listFacultyGroupOptions,
+  listGroupDisciplineOptions,
+  listGroupStudentOptions,
+  listTeacherClasses,
+  setTeacherAttendance,
+} from "@/lib/data/journal";
+import { listGradableDisciplines, listGradableLessons } from "@/lib/data/marks";
+import { listFacultyCourses } from "@/lib/data/notifications";
 import { teacherGroupIds } from "@/lib/data/notifications";
 import { journalMessage, safeJournalBack } from "@/lib/validation/journal";
 
@@ -58,6 +69,9 @@ describe("Журнал преподавателя", () => {
     expect(lessons.every((l) => l.teacherId === teacher.teacherId && l.status !== "CANCELLED")).toBe(true);
     const full = (await getTeacherJournal(teacher, groupId, disciplineId, { all: true }))!;
     expect(full.lessons.length).toBe(full.totalLessons);
+    // столбцы — хронологически слева направо
+    const dates = j.lessons.map((l) => `${l.date} ${l.start}`);
+    expect([...dates].sort()).toEqual(dates);
     // у каждой пары «студент × занятие» есть клетка
     for (const s of j.students) expect(Object.keys(j.cells[s.id]!).length).toBe(j.lessons.length);
   });
@@ -103,5 +117,66 @@ describe("Журнал преподавателя", () => {
     expect(journalMessage("mark")).toMatch(/оценку/);
     expect(journalMessage("Ваш пароль устарел, зайдите на evil.example")).toBeNull();
     expect(journalMessage(undefined)).toBeNull();
+  });
+});
+
+describe("Деканат: таблица и форма поиска", () => {
+  let staff: StaffContext;
+  let otherStaff: StaffContext;
+  beforeAll(async () => {
+    const st = await db.staff.findFirstOrThrow({ orderBy: { faculty: { sortOrder: "asc" } } });
+    staff = { userId: st.userId, staffId: st.id, facultyId: st.facultyId } as StaffContext;
+    const o = await db.staff.findFirstOrThrow({ where: { facultyId: { not: st.facultyId } } });
+    otherStaff = { userId: o.userId, staffId: o.id, facultyId: o.facultyId } as StaffContext;
+  });
+
+  it("цепочка курс → группа → студент → предмет → дата: каждый список — по выбору в предыдущем", async () => {
+    const courses = await listFacultyCourses(staff);
+    expect(courses.length).toBeGreaterThan(0);
+    const course = courses[0]!.course;
+    const groups = await listFacultyGroupOptions(staff, course);
+    expect(groups.length).toBeGreaterThan(0);
+    const dbGroups = await db.group.findMany({ where: { id: { in: groups.map((g) => g.id) } }, select: { course: true, facultyId: true } });
+    expect(dbGroups.every((g) => g.course === course && g.facultyId === staff.facultyId)).toBe(true);
+
+    const students = await listGroupStudentOptions(staff, groups[0]!.id);
+    expect(students.length).toBeGreaterThan(0);
+    const dbStudents = await db.student.findMany({
+      where: { id: { in: students.map((x) => x.id) } },
+      select: { facultyId: true, academicGroupId: true, languageGroups: { select: { groupId: true } } },
+    });
+    expect(
+      dbStudents.every(
+        (x) => x.facultyId === staff.facultyId && (x.academicGroupId === groups[0]!.id || x.languageGroups.some((g) => g.groupId === groups[0]!.id)),
+      ),
+    ).toBe(true);
+
+    const disciplines = await listGradableDisciplines(staff, students[0]!.id);
+    expect(disciplines.length).toBeGreaterThan(0);
+    const lessons = await listGradableLessons(staff, students[0]!.id, disciplines[0]!.id);
+    expect(lessons.length).toBeGreaterThan(0);
+    const dbLessons = await db.lesson.findMany({ where: { id: { in: lessons.map((l) => l.id) } }, select: { disciplineId: true } });
+    expect(dbLessons.every((l) => l.disciplineId === disciplines[0]!.id)).toBe(true);
+  });
+
+  it("чужой факультет: пустые списки и нет журнала", async () => {
+    const course = (await listFacultyCourses(staff))[0]!.course;
+    const group = (await listFacultyGroupOptions(staff, course))[0]!;
+    expect(await listGroupStudentOptions(otherStaff, group.id)).toEqual([]);
+    expect(await listGroupDisciplineOptions(otherStaff, group.id)).toEqual([]);
+    const discipline = (await listGroupDisciplineOptions(staff, group.id))[0]!;
+    expect(await getJournal(otherStaff, group.id, discipline.id)).toBeNull();
+  });
+
+  it("таблица деканата: все занятия группы по предмету, хронологически; студенты только своего факультета", async () => {
+    const course = (await listFacultyCourses(staff))[0]!.course;
+    const group = (await listFacultyGroupOptions(staff, course))[0]!;
+    const discipline = (await listGroupDisciplineOptions(staff, group.id))[0]!;
+    const j = (await getJournal(staff, group.id, discipline.id, { all: true }))!;
+    expect(j.lessons.length).toBeGreaterThan(0);
+    const dates = j.lessons.map((l) => `${l.date} ${l.start}`);
+    expect([...dates].sort()).toEqual(dates);
+    const facultyIds = await db.student.findMany({ where: { id: { in: j.students.map((x) => x.id) } }, select: { facultyId: true } });
+    expect(facultyIds.every((f) => f.facultyId === staff.facultyId)).toBe(true);
   });
 });

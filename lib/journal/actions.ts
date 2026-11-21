@@ -3,9 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { runAction } from "@/lib/actions/errors";
-import { requireTeacher } from "@/lib/auth/guards";
+import { getStaffContext, getTeacherContext, requireTeacher } from "@/lib/auth/guards";
 import { setTeacherAttendance } from "@/lib/data/journal";
-import { createMark, deleteMark } from "@/lib/data/marks";
+import { createMark, deleteMark, type Grader } from "@/lib/data/marks";
 import {
   journalAttendanceSchema,
   journalMarkSchema,
@@ -14,23 +14,34 @@ import {
   type JournalMessage,
 } from "@/lib/validation/journal";
 
-// Действия журнала преподавателя. Каждое — обычная форма (<form action>): работает и без JavaScript.
-// После сохранения — возврат на ту же страницу журнала (с открытой клеткой), ошибка — КОД в параметре msg
-// (текст — в lib/validation/journal.ts; подробности ошибки сервера — в логе через runAction).
-// Права (свои группы, свои занятия) — в lib/data/marks.ts и lib/data/journal.ts.
+// Действия ввода оценок без JavaScript: журнал преподавателя (/teacher/marks), таблица и форма поиска
+// деканата (/staff/marks). Каждое — обычная форма (<form action>), после сохранения — возврат на ту же
+// страницу (адрес из поля back, только /teacher|staff/marks…). Ошибка — КОД в параметре msg (текст —
+// в lib/validation/journal.ts), успех — ok=1. Права (свой факультет / свои группы и занятия) —
+// в lib/data/marks.ts и lib/data/journal.ts; кто ставит — только по сессии.
 
-function back(formData: FormData, error?: JournalMessage): never {
-  const url = new URL(safeJournalBack(formData.get("back")), "http://local");
-  if (error) url.searchParams.set("msg", error);
-  else url.searchParams.delete("msg");
+async function requireGrader(): Promise<Grader> {
+  const ctx = (await getStaffContext()) ?? (await getTeacherContext());
+  if (!ctx) redirect("/login");
+  return ctx;
+}
+
+function back(formData: FormData, ctx: Grader, result: { error?: JournalMessage; ok?: boolean }): never {
+  const fallback = "teacherId" in ctx ? "/teacher/marks" : "/staff/marks";
+  const url = new URL(safeJournalBack(formData.get("back"), fallback), "http://local");
+  url.searchParams.delete("msg");
+  url.searchParams.delete("ok");
+  if (result.error) url.searchParams.set("msg", result.error);
+  if (result.ok) url.searchParams.set("ok", "1");
   revalidatePath("/teacher/marks");
+  revalidatePath("/staff/marks");
   redirect(`${url.pathname}${url.search}#editor`);
 }
 
 export async function addJournalMarkAction(formData: FormData): Promise<void> {
-  const ctx = await requireTeacher();
+  const ctx = await requireGrader();
   const parsed = journalMarkSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) back(formData, "mark");
+  if (!parsed.success) back(formData, ctx, { error: "mark" });
   const input = parsed.data;
   const error = await runAction(
     "journalAddMark",
@@ -40,26 +51,27 @@ export async function addJournalMarkAction(formData: FormData): Promise<void> {
     },
     () => "server" as const,
   );
-  back(formData, error);
+  back(formData, ctx, error ? { error } : { ok: true });
 }
 
 export async function removeJournalMarkAction(formData: FormData): Promise<void> {
-  const ctx = await requireTeacher();
+  const ctx = await requireGrader();
   const parsed = journalRemoveMarkSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) back(formData, "remove");
+  if (!parsed.success) back(formData, ctx, { error: "remove" });
   const id = parsed.data.markId;
   const error = await runAction(
     "journalRemoveMark",
     async () => ((await deleteMark(ctx, id)) ? undefined : ("remove" as const)),
     () => "server" as const,
   );
-  back(formData, error);
+  back(formData, ctx, { error });
 }
 
+/** Посещаемость отмечает только преподаватель (у деканата — просмотр). */
 export async function setJournalAttendanceAction(formData: FormData): Promise<void> {
   const ctx = await requireTeacher();
   const parsed = journalAttendanceSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) back(formData, "attendance");
+  if (!parsed.success) back(formData, ctx, { error: "attendance" });
   const { studentId, lessonId, status } = parsed.data;
   const error = await runAction(
     "journalAttendance",
@@ -69,5 +81,5 @@ export async function setJournalAttendanceAction(formData: FormData): Promise<vo
     },
     () => "server" as const,
   );
-  back(formData, error);
+  back(formData, ctx, { error });
 }

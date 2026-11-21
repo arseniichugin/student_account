@@ -95,11 +95,20 @@ describe("Форма события (Zod)", () => {
 });
 
 describe("События деканата: получатели и видимость", () => {
-  it("«всем» — все студенты своего факультета; студент другого факультета не получает", async () => {
+  it("«всем» — студенты своего факультета и его преподаватели; студент другого факультета не получает", async () => {
     const r = await send(staffA, { title: "Всем факультета A" });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.recipients).toBe(await db.student.count({ where: { facultyId: facultyA } }));
+    const students = await db.student.count({ where: { facultyId: facultyA } });
+    const teachers = await db.teacher.findMany({
+      where: { userId: { not: null }, lessons: { some: { groups: { some: { group: { facultyId: facultyA } } } } } },
+      select: { userId: true },
+    });
+    expect(teachers.length).toBeGreaterThan(0);
+    expect(r.recipients).toBe(students + teachers.length);
+    // преподаватель факультета получил «всем»
+    const teacherInbox = await db.notification.count({ where: { announcementId: r.id, userId: teachers[0]!.userId! } });
+    expect(teacherInbox).toBe(1);
     expect((await listMyNotifications(rcpt(studentA))).some((n) => n.title === "Всем факультета A")).toBe(true);
     expect((await listMyNotifications(rcpt(studentB))).some((n) => n.title === "Всем факультета A")).toBe(false);
   });

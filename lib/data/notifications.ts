@@ -10,9 +10,9 @@ import { GROUP_SUGGEST_LIMIT } from "@/lib/validation/notifications";
 // ПРАВИЛА:
 //   получатель (студент, преподаватель) → только свои уведомления: where.userId = ctx.userId (из сессии)
 //               и только уже «отправленные» (createdAt ≤ сейчас) — запланированные заранее не видны;
-//   деканат   → события своего факультета (facultyId = ctx.facultyId). Получатели — студенты своего
-//               факультета (всем / курсу / группе) или преподаватели, которые ведут занятия у групп
-//               факультета (всем / одному);
+//   деканат   → события своего факультета (facultyId = ctx.facultyId). «Всем» — студенты факультета
+//               и преподаватели, которые ведут занятия у его групп; курсу / группе — студенты;
+//               «всем преподавателям» / «преподавателю …» — только преподаватели факультета;
 //   преподаватель → только своим группам (у которых он ведёт занятия): всем сразу или одной.
 // Чужая группа / чужой преподаватель / чужое событие → тот же ответ, что и несуществующие.
 
@@ -90,8 +90,11 @@ async function resolveStaffAudience(ctx: StaffContext, audience: Audience): Prom
   const ids = async (where: Prisma.StudentWhereInput) =>
     (await db.student.findMany({ where: { facultyId: ctx.facultyId, ...where }, select: { userId: true } })).map((s) => s.userId);
   switch (audience.type) {
-    case "faculty":
-      return { userIds: await ids({}) };
+    case "faculty": {
+      // «Всем» — студентам И преподавателям, которые ведут занятия у групп факультета
+      const teachers = await db.teacher.findMany({ where: facultyTeachersWhere(ctx.facultyId), select: { userId: true } });
+      return { userIds: [...(await ids({})), ...teachers.map((t) => t.userId!)] };
+    }
     case "course":
       return { userIds: await ids({ course: audience.course }), course: audience.course };
     case "group": {
@@ -233,7 +236,7 @@ export type SentAnnouncement = {
 export type FacultyAnnouncement = SentAnnouncement;
 
 const AUDIENCE_TEXT: Record<AnnouncementAudience, string> = {
-  FACULTY: "Всем студентам факультета",
+  FACULTY: "Всем: студентам и преподавателям факультета",
   COURSE: "Курс",
   GROUP: "Группа",
   ALL_TEACHERS: "Всем преподавателям",
