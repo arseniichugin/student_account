@@ -11,9 +11,7 @@ export async function runAction<T>(name: string, fn: () => Promise<T>, onError: 
     return await fn();
   } catch (e) {
     unstable_rethrow(e);
-    // В лог — только код и первая строка: в полном тексте ошибки Prisma бывают аргументы запроса (данные людей)
-    const err = e as { name?: string; code?: string; message?: string };
-    console.error(`[action:${name}] ${err.name ?? "Error"} ${err.code ?? ""} ${String(err.message ?? e).split("\n").find((l) => l.trim()) ?? ""}`);
+    console.error(`[action:${name}] ${errorSummary(e)}`);
     return onError(serverErrorMessage(e));
   }
 }
@@ -25,4 +23,20 @@ export function serverErrorMessage(e: unknown): string {
     return "Не удалось сохранить: база данных не обновлена до новой версии кабинета. Администратору нужно применить миграции (см. docs/DEPLOYMENT.md).";
   }
   return "Не удалось сохранить из-за ошибки на сервере. Попробуйте ещё раз; если повторяется — сообщите администратору.";
+}
+
+/**
+ * Одна строка об ошибке для лога: имя, код и суть — без аргументов запроса (в полном тексте ошибки Prisma
+ * бывают данные людей). У Prisma суть — строка вида «The table `public.X` does not exist…», а не первая.
+ */
+export function errorSummary(e: unknown): string {
+  const err = e as { name?: string; code?: string; message?: string };
+  // Значения в двойных кавычках — это аргументы запроса (например, введённый логин): вырезаем
+  const lines = String(err?.message ?? e)
+    .split("\n")
+    .map((l) => l.replace(/"(?:[^"\\]|\\.)*"/g, '"…"').trim())
+    .filter(Boolean);
+  const gist =
+    lines.find((l) => /does not exist|not found|denied|refused|timed? ?out|unique constraint|foreign key/i.test(l)) ?? lines[0] ?? "";
+  return `${err?.name ?? "Error"} ${err?.code ?? ""} ${gist.slice(0, 300)}`.replace(/\s+/g, " ").trim();
 }
