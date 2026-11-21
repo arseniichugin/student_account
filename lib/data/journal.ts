@@ -1,13 +1,15 @@
 import "server-only";
 import { isDemoMode } from "@/lib/config";
 import { db } from "@/lib/db";
-import type { TeacherContext } from "@/lib/auth/guards";
+import type { StaffContext, TeacherContext } from "@/lib/auth/guards";
 import type { AttendanceStatus } from "@/lib/generated/prisma/client";
-import { gradableLessonsWhere, gradableStudent } from "@/lib/data/marks";
+import { gradableLessonsWhere, gradableStudent, type Grader } from "@/lib/data/marks";
 import { teacherGroupIds } from "@/lib/data/notifications";
 import { dbDateToIso, moscowToday } from "@/lib/moscow-time";
 
-// Журнал преподавателя (/teacher/marks): таблица «студенты × занятия» по одной паре (группа, предмет).
+// Журнал (/teacher/marks у преподавателя, /staff/marks?view=table у деканата):
+// таблица «студенты × занятия» по одной паре (группа, предмет). Деканат — группы своего факультета,
+// все занятия группы по предмету; преподаватель — правила ниже.
 // ПРАВИЛА (как у оценок, lib/data/marks.ts):
 //   — пары «группа + предмет» — только из ЕГО занятий (lesson.teacherId = ctx.teacherId);
 //   — столбцы — только его начавшиеся неотменённые занятия у этой группы;
@@ -84,9 +86,9 @@ const fio = (s: { lastName: string; firstName: string; middleName: string | null
 const shortFio = (s: { lastName: string; firstName: string; middleName: string | null }) =>
   `${s.lastName} ${s.firstName[0]}.${s.middleName ? ` ${s.middleName[0]}.` : ""}`;
 
-/** Журнал по паре «группа + предмет»; null — преподаватель такую пару не ведёт. */
-export async function getTeacherJournal(
-  ctx: TeacherContext,
+/** Журнал по паре «группа + предмет»; null — нет доступа (чужая группа / преподаватель не ведёт эту пару). */
+export async function getJournal(
+  ctx: Grader,
   groupId: string,
   disciplineId: string,
   opts: { all?: boolean; today?: string } = {},
@@ -94,7 +96,10 @@ export async function getTeacherJournal(
   const today = opts.today ?? moscowToday();
   const [group, discipline] = await Promise.all([
     db.group.findFirst({
-      where: { id: groupId, lessons: { some: { lesson: { teacherId: ctx.teacherId, disciplineId } } } },
+      where:
+        "teacherId" in ctx
+          ? { id: groupId, lessons: { some: { lesson: { teacherId: ctx.teacherId, disciplineId } } } }
+          : { id: groupId, facultyId: ctx.facultyId, lessons: { some: { lesson: { disciplineId } } } },
       select: { id: true, name: true },
     }),
     db.discipline.findUnique({ where: { id: disciplineId }, select: { id: true, name: true } }),
@@ -106,11 +111,15 @@ export async function getTeacherJournal(
     orderBy: [{ date: "asc" }, { startTime: "asc" }],
     select: { id: true, date: true, startTime: true, kind: true },
   });
-  // Новые занятия — первыми (слева): на телефоне сразу видно сегодняшнее
-  const shown = (opts.all ? allLessons : allLessons.slice(-JOURNAL_RECENT_LESSONS)).reverse();
+  // Хронологически слева направо; по умолчанию — последние занятия
+  const shown = opts.all ? allLessons : allLessons.slice(-JOURNAL_RECENT_LESSONS);
 
   const students = await db.student.findMany({
-    where: { OR: [{ academicGroupId: group.id }, { languageGroups: { some: { groupId: group.id } } }] },
+    where: {
+      OR: [{ academicGroupId: group.id }, { languageGroups: { some: { groupId: group.id } } }],
+      // деканату — только студенты своего факультета (им он и может ставить оценки)
+      ...("teacherId" in ctx ? {} : { facultyId: ctx.facultyId }),
+    },
     orderBy: [{ lastName: "asc" }, { firstName: "asc" }, { id: "asc" }],
     select: { id: true, lastName: true, firstName: true, middleName: true },
   });
@@ -121,7 +130,7 @@ export async function getTeacherJournal(
     db.mark.findMany({
       where: { lessonId: { in: lessonIds }, studentId: { in: studentIds } },
       orderBy: { createdAt: "asc" },
-      select: { id: true, value: true, studentId: true, lessonId: true, teacherId: true },
+      select: { id: true, value: true, studentId: true, lessonId: true, teacherId: true, createdById: true },
     }),
     db.attendance.findMany({
       where: { lessonId: { in: lessonIds }, studentId: { in: studentIds } },
@@ -135,7 +144,9 @@ export async function getTeacherJournal(
     for (const l of shown) cells[s.id]![l.id] = { marks: [], attendance: null };
   }
   for (const m of marks) {
-    cells[m.studentId]?.[m.lessonId!]?.marks.push({ id: m.id, value: m.value, own: m.teacherId === ctx.teacherId });
+    // «своя» — можно удалить: преподавателю — выставленные им, деканату — выставленные деканатом
+    const own = "teacherId" in ctx ? m.teacherId === ctx.teacherId : m.createdById !== null;
+    cells[m.studentId]?.[m.lessonId!]?.marks.push({ id: m.id, value: m.value, own });
   }
   for (const a of attendance) {
     const cell = cells[a.studentId]?.[a.lessonId!];
@@ -202,4 +213,55 @@ export async function setTeacherAttendance(
     update: { status: input.status, lessonId: lesson.id, teacherId: ctx.teacherId },
   });
   return { ok: true };
+}
+
+/** Журнал преподавателя (прежнее имя). */
+export function getTeacherJournal(ctx: TeacherContext, groupId: string, disciplineId: string, opts: { all?: boolean; today?: string } = {}) {
+  return getJournal(ctx, groupId, disciplineId, opts);
+}
+
+// ─── Деканат: выбор курса → группы → предмета (таблица и форма поиска) ─────────
+
+export type Option = { id: string; label: string; meta?: string };
+
+/** Группы факультета на курсе (или все, если курс не задан), в которых есть студенты факультета. */
+export async function listFacultyGroupOptions(ctx: StaffContext, course?: number): Promise<Option[]> {
+  const rows = await db.group.findMany({
+    where: {
+      facultyId: ctx.facultyId,
+      ...(course ? { course } : {}),
+      OR: [{ students: { some: { facultyId: ctx.facultyId } } }, { members: { some: { student: { facultyId: ctx.facultyId } } } }],
+    },
+    orderBy: [{ kind: "asc" }, { name: "asc" }],
+    select: { id: true, name: true, kind: true },
+  });
+  return rows.map((g) => ({ id: g.id, label: g.name, meta: g.kind === "LANGUAGE" ? "языковая" : undefined }));
+}
+
+/** Предметы, по которым у группы уже были занятия (для таблицы деканата). */
+export async function listGroupDisciplineOptions(ctx: StaffContext, groupId: string, today: string = moscowToday()): Promise<Option[]> {
+  const group = await db.group.findFirst({ where: { id: groupId, facultyId: ctx.facultyId }, select: { id: true } });
+  if (!group) return [];
+  const rows = await db.discipline.findMany({
+    where: { lessons: { some: gradableLessonsWhere(ctx, [group.id], today) } },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
+  });
+  return rows.map((d) => ({ id: d.id, label: d.name }));
+}
+
+/** Студенты группы своего факультета (для формы поиска деканата). */
+export async function listGroupStudentOptions(ctx: StaffContext, groupId: string): Promise<Option[]> {
+  // группа — только своего факультета (защита не должна зависеть от вызывающего кода)
+  const group = await db.group.findFirst({ where: { id: groupId, facultyId: ctx.facultyId }, select: { id: true } });
+  if (!group) return [];
+  const rows = await db.student.findMany({
+    where: {
+      facultyId: ctx.facultyId,
+      OR: [{ academicGroupId: groupId }, { languageGroups: { some: { groupId } } }],
+    },
+    orderBy: [{ lastName: "asc" }, { firstName: "asc" }, { id: "asc" }],
+    select: { id: true, lastName: true, firstName: true, middleName: true },
+  });
+  return rows.map((s) => ({ id: s.id, label: fio(s) }));
 }

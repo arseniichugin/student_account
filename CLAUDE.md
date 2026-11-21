@@ -102,14 +102,14 @@ Next.js 16 (App Router) + TypeScript · React 19 · Tailwind CSS 4 · PostgreSQL
 app/(auth)/login/        вход
 app/(app)/               кабинет: layout (requireUser) рисует оболочку и меню по роли; error.tsx — «Повторить»
 app/(app)/(student)/     страницы студента: today, grades, requests, profile (layout + КАЖДАЯ страница — requireStudent)
-app/(app)/(staff)/staff/ кабинет сотрудника деканата (requireStaff); marks/ — ввод оценок; notifications/ — события и уведомления
+app/(app)/(staff)/staff/ кабинет сотрудника деканата (requireStaff); marks/ — ввод оценок: форма (курс → группа →
+                         студент → предмет → дата) и таблица (журнал); notifications/ — события и уведомления
 app/(app)/(teacher)/teacher/ кабинет преподавателя (requireTeacher): marks/ — журнал (студенты × занятия: оценки
                          и посещаемость, работает без JS), notifications/ — рассылка своим группам
 app/(app)/notifications/ входящие уведомления — студент и преподаватель (requireRecipient)
 app/(app)/schedule/      расписание группы/преподавателя — обе роли (requireUser)
 app/(app)/map/           карта кампуса — обе роли (requireUser)
 app/api/schedule/search/ подсказки поиска (getUserContext → 401 без сессии; студентов не возвращает)
-app/api/marks/suggest/   подсказки ввода оценок (деканат или преподаватель, иначе 401; свой факультет / свои группы, ≤ 5)
 app/api/staff/notifications/teachers/ подсказки «Преподавателю…» (getStaffContext → 401; ведущие у факультета, ≤ 5)
 app/api/teacher/groups/  подсказки групп преподавателя (getTeacherContext → 401; только его группы, ≤ 5)
 app/api/staff/notifications/groups/ подсказки групп для событий (getStaffContext → 401; свой факультет, ≤ 5)
@@ -126,8 +126,10 @@ lib/data/schedule.ts     расписание: личное (StudentContext), г
 lib/data/marks.ts        оценки на занятиях: обзор студента (StudentContext), ввод — Grader (StaffContext | TeacherContext)
 lib/data/teacher.ts      профиль преподавателя (TeacherContext)
 lib/data/journal.ts      журнал преподавателя: пары «группа + предмет», таблица, посещаемость (TeacherContext)
-lib/journal/actions.ts   действия журнала (обычные формы + redirect обратно; ошибки — кодом ?msg=)
-lib/marks/form-actions.ts, lib/notifications/form-actions.ts  серверные действия форм оценок и событий (обе роли)
+lib/journal/actions.ts   действия ввода оценок (журнал, таблица и форма деканата): обычные формы + redirect обратно; ошибки — кодом ?msg=
+components/journal/journal-table.tsx  таблица журнала с панелью клетки — общая для преподавателя и деканата
+components/ui/auto-submit.tsx  GET-форма зависимых списков: с JS — отправка при выборе, без JS — кнопка
+lib/notifications/form-actions.ts  серверные действия форм событий (деканат и преподаватель)
 lib/data/notifications.ts  события деканата и преподавателя, входящие уведомления (RecipientContext, только createdAt ≤ now)
 lib/notifications/labels.ts  подписи видов событий и аудиторий (годится клиенту)
 lib/marks/stats.ts       семестры по датам, средние, разбор даты «12.11» (чистые функции)
