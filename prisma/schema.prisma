@@ -23,16 +23,21 @@ enum Role {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  login        String   @unique
+  id             String    @id @default(cuid())
+  login          String    @unique
   /// Хеш argon2id. Пароль в открытом виде нигде не хранится.
-  passwordHash String
-  role         Role
+  passwordHash   String
+  role           Role
   /// Тестовый аккаунт для жюри: импорт при каждом запуске ставит ему пароль из DEMO_PASSWORD.
-  isDemo       Boolean  @default(false)
-  createdAt    DateTime @default(now())
+  isDemo         Boolean   @default(false)
+  /// «О себе»: обычный текст до 1000 символов (без HTML, переводы строк сохраняются). Меняет только сам пользователь.
+  about          String?
+  /// Когда «О себе» сохраняли в последний раз
+  aboutUpdatedAt DateTime?
+  createdAt      DateTime  @default(now())
 
   student       Student?
+  aboutEdits    AboutEdit[]
   staff         Staff?
   teacher       Teacher?
   sessions      Session[]
@@ -50,6 +55,16 @@ model Session {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+/// Журнал сохранений «О себе» — для ограничения частоты (MAX_ABOUT_EDITS_PER_HOUR в lib/data/account.ts).
+model AboutEdit {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
 
 /// Журнал попыток входа — для защиты от подбора пароля.
