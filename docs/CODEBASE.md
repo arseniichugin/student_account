@@ -7,7 +7,7 @@
 > Пути к файлам указаны от корня репозитория. Правила, которые нарушать нельзя, — в [`CLAUDE.md`](../CLAUDE.md);
 > здесь — устройство кода и готовые рецепты.
 >
-> **Актуально на:** 17 ноября 2026 (этап 3 — обязательное ядро; кабинет преподавателя готов).
+> **Актуально на:** 21 ноября 2026 (этап 3 — обязательное ядро; кабинет преподавателя, профили всех ролей).
 
 ## Содержание
 
@@ -139,6 +139,11 @@ API (`app/api/*/route.ts`) используют `get…Context()` вместо `
 | `requireRecipient()` | — | `STUDENT`, `TEACHER` | `userId`, `role` | свои уведомления (`userId`) |
 | `requireUser()` | `getUserContext()` | любой вошедший | `userId`, `role`, `facultyId?` | открытые данные вуза (расписание, карта) |
 
+**Профиль** есть у каждой роли (`PROFILE_HREF` в `lib/navigation.ts`): данные аккаунта, «О себе», смена пароля.
+«О себе» (`User.about`, до 1000 символов, обычный текст) меняет только сам пользователь (`saveAboutAction` → `updateMyAbout(ctx: UserContext)`).
+Демо-решение: тестовым аккаунтам «О себе» **разрешено** (жюри должно попробовать функцию), но с лимитом 5 в час,
+подсказкой «текст увидят все посетители», и `npm run db:seed` возвращает их тексты к исходным. Смена пароля у тестовых аккаунтов и в `DEMO_MODE` — запрещена.
+
 Чужая роль на странице → редирект на свою главную (`HOME` в `lib/navigation.ts`:
 студент `/today`, деканат `/staff`, преподаватель `/schedule`). Нет сессии → `/login`.
 
@@ -166,14 +171,16 @@ db.request.findFirst({ where: { id, studentId: ctx.studentId } })
 | `/today` | `app/(app)/(student)/today/` | `requireStudent` | schedule, schedule-moves, requests, profile | PRD §5.2 |
 | `/grades` | `app/(app)/(student)/grades/` | `requireStudent` | marks | MARKS.md |
 | `/requests`, `/requests/new`, `/requests/[id]` | `app/(app)/(student)/requests/` | `requireStudent` | requests | PRD §5.5 |
-| `/profile` | `app/(app)/(student)/profile/` | `requireStudent` | profile, account | PRD §5.1 |
+| `/profile` | `app/(app)/(student)/profile/` — данные, «О себе», смена пароля | `requireStudent` | profile, account | PRD §5.1 |
 | `/staff` | `app/(app)/(staff)/staff/` | `requireStaff` | requests, profile | PRD §5.7 |
 | `/staff/marks` | `app/(app)/(staff)/staff/marks/` — `?view=form` (курс → группа → студент → предмет → дата) или `?view=table` (журнал) | `requireStaff` | journal, marks | MARKS.md |
 | `/staff/notifications` | `app/(app)/(staff)/staff/notifications/` | `requireStaff` | notifications | NOTIFICATIONS.md |
+| `/staff/profile` | `app/(app)/(staff)/staff/profile/` — ФИО, должность, факультет, логин, «О себе», смена пароля | `requireStaff` | profile, account | §5 ниже |
 | `/teacher/marks` | `app/(app)/(teacher)/teacher/marks/` — журнал (студенты × занятия, оценки и посещаемость; без клиентского JS) | `requireTeacher` | journal, marks, teacher | TEACHERS.md |
 | `/teacher/notifications` | `app/(app)/(teacher)/teacher/notifications/` | `requireTeacher` | notifications, teacher | TEACHERS.md |
+| `/teacher/profile` | `app/(app)/(teacher)/teacher/profile/` — ФИО, звание, дисциплины и группы, логин, «О себе», смена пароля | `requireTeacher` | teacher, account | TEACHERS.md |
 | `/notifications` | `app/(app)/notifications/` | `requireRecipient` | notifications | NOTIFICATIONS.md |
-| `/schedule` | `app/(app)/schedule/` | `requireUser` (+ роль для «моего») | schedule, schedule-moves | DESIGN §6 |
+| `/schedule` | `app/(app)/schedule/` (у `?teacher=` — «О преподавателе» из его «О себе») | `requireUser` (+ роль для «моего») | schedule, schedule-moves | DESIGN §6 |
 | `/map` | `app/(app)/map/` | `requireUser` | файл `campus-map.json` | `lib/campus-map/` |
 
 У каждого раздела есть `loading.tsx` (скелетон); общий `app/(app)/error.tsx` даёт кнопку «Повторить».
@@ -183,7 +190,8 @@ Layout-ы групп `(student)`, `(staff)`, `(teacher)` — дополните�
 
 | Файл | Действия | Guard |
 |---|---|---|
-| `lib/auth/actions.ts` | `loginAction`, `logoutAction`, `changePasswordAction` | — / сессия |
+| `lib/auth/actions.ts` | `loginAction`, `logoutAction`, `changePasswordAction` (любая роль; блокировка `getPasswordChangeLock`) | — / сессия |
+| `lib/profile/actions.ts` | `saveAboutAction` — «О себе» (только своё: userId из сессии, в форме его нет) | `requireUser` |
 | `app/(app)/(student)/requests/actions.ts` | `createRequestAction`, `markRequestsSeenAction` | `requireStudent` |
 | `app/(app)/(student)/grades/actions.ts` | `markMarksSeenAction` | `requireStudent` |
 | `app/(app)/(staff)/staff/actions.ts` | `updateStatusAction` — смена статуса заявки | `requireStaff` |
@@ -217,11 +225,12 @@ Layout-ы групп `(student)`, `(staff)`, `(teacher)` — дополните�
 | `profile.ts` | `getMyStudentProfile`, `getMyStaffProfile` | Student · Staff |
 | `teacher.ts` | `getMyTeacherProfile` | Teacher |
 | `journal.ts` | `listTeacherClasses`, `getJournal` (деканат и преподаватель), `setTeacherAttendance` · `listFacultyGroupOptions`, `listGroupDisciplineOptions`, `listGroupStudentOptions` | Grader · Teacher · Staff |
-| `account.ts` | `getPasswordChangeLock`, `changeMyPassword` | userId из сессии |
+| `account.ts` | `getPasswordChangeLock`, `changeMyPassword` · `getMyAbout`, `updateMyAbout` («О себе», лимит `MAX_ABOUT_EDITS_PER_HOUR[_DEMO]`) | userId из сессии · User |
 
 Ограничения частоты (защита от спама) живут рядом с функциями записи:
 `MAX_ACTIVE_REQUESTS`, `MAX_REQUESTS_PER_HOUR` (заявки), `MAX_MARKS_PER_HOUR[_DEMO]` (оценки),
-`MAX_ANNOUNCEMENTS_PER_HOUR[_DEMO]`, `MAX_SCHEDULE_AHEAD_DAYS` (события), `MAX_ATTENDANCE_PER_HOUR[_DEMO]` (посещаемость). Лимиты входа — `lib/auth/rate-limit.ts`.
+`MAX_ANNOUNCEMENTS_PER_HOUR[_DEMO]`, `MAX_SCHEDULE_AHEAD_DAYS` (события), `MAX_ATTENDANCE_PER_HOUR[_DEMO]` (посещаемость),
+`MAX_ABOUT_EDITS_PER_HOUR[_DEMO]` («О себе»: 20 в час; у тестовых аккаунтов и в `DEMO_MODE` — 5; журнал `AboutEdit`). Лимиты входа — `lib/auth/rate-limit.ts`.
 
 Функции записи возвращают результат-объединение, а не бросают исключения:
 `{ ok: true, id } | { ok: false, reason: "too-many-recent" | … }` — действие превращает `reason` в текст для формы.
@@ -234,7 +243,7 @@ Layout-ы групп `(student)`, `(staff)`, `(teacher)` — дополните�
 Источник истины — `prisma/schema.prisma` (с комментариями `///` к полям). Подробная таблица — `docs/ARCHITECTURE.md` §3.
 
 ```
-                 ┌────────── User (login, passwordHash, role, isDemo) ──────────┐
+                 ┌──── User (login, passwordHash, role, isDemo, about) ─────────┐
                  │                 │                    │                       │
               Student            Staff               Teacher               Session, Notification
    (facultyId, programId,   (facultyId — один    (oid из расписания;
@@ -251,14 +260,14 @@ Layout-ы групп `(student)`, `(staff)`, `(teacher)` — дополните�
 
 Announcement (author → User, audience, facultyId? / course? / groupId? / teacherId?, publishedAt)
    └── Notification (userId, type, readAt, createdAt = момент видимости)
-Deadline (groupId, disciplineId?) · LoginAttempt (лимиты входа)
+Deadline (groupId, disciplineId?) · LoginAttempt (лимиты входа) · AboutEdit (userId, createdAt — лимит «О себе»)
 ```
 
 Перечисления: `Role` (STUDENT | STAFF | TEACHER), `LessonStatus` (NORMAL | MOVED | CANCELLED | REPLACED),
 `RequestStatus`, `GradeKind`, `GroupKind`, `AnnouncementAudience`, `NotificationType`.
 В клиентских компонентах импортируй их из `@/lib/generated/prisma/enums`, на сервере — из `@/lib/generated/prisma/client`.
 
-Миграции — `prisma/migrations/` (по одной на крупную функцию: init, данные вуза, оценки, уведомления, кружки, преподаватели).
+Миграции — `prisma/migrations/` (по одной на крупную функцию: init, данные вуза, оценки, уведомления, кружки, преподаватели, посещаемость, «О себе»).
 
 ## 9. Данные вуза: импорт и демо-наполнение
 
@@ -278,6 +287,8 @@ Deadline (groupId, disciplineId?) · LoginAttempt (лимиты входа)
   бейдж «Концепт для конкурса» (`components/concept-badge.tsx`) на каждой странице.
 - **Базовые компоненты** — `components/ui/`: `Button`/`buttonVariants`, `Card`, поля формы (`Input`, `Select`, `Textarea`, `Label`, `FormMessage` — `form.tsx`),
   `Combobox` (подсказки до 5 вариантов), `EmptyState` и `Skeleton` (`states.tsx`), `RetryButton`, `DetailsList`.
+- **Профиль** — `components/profile/`: `ProfileHeader`, `AboutCard` + `AboutForm` («О себе», `<details>` — работает без JS),
+  `PasswordCard` (форма или объяснение блокировки), `ProfileSkeleton` (общий `loading.tsx` трёх профилей).
 - **Предметные компоненты** — `components/schedule/`, `components/marks/`, `components/notifications/`,
   `components/campus-map/`, `status-badge.tsx`, `status-timeline.tsx`.
 - **Три состояния** у каждого экрана с данными: загрузка (`loading.tsx` + скелетон), пусто (`EmptyState` с действием),

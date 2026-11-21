@@ -308,14 +308,16 @@ export async function getTeacherSchedule(
   teacherId: string,
   from: string,
   to: string,
-): Promise<{ teacher: ScheduleTeacherInfo; lessons: ScheduleLesson[] } | null> {
+): Promise<{ teacher: ScheduleTeacherInfo; about: string | null; lessons: ScheduleLesson[] } | null> {
   const date = checkRange(from, to);
   if (teacherId.length === 0 || teacherId.length > 64) return null;
-  const teacher = await db.teacher.findUnique({
+  const row = await db.teacher.findUnique({
     where: { id: teacherId },
-    select: { id: true, shortName: true, fullName: true, rank: true, email: true },
+    // «О себе» — текст, который преподаватель сам разместил для студентов (профиль /teacher/profile)
+    select: { id: true, shortName: true, fullName: true, rank: true, email: true, user: { select: { about: true } } },
   });
-  if (!teacher) return null;
+  if (!row) return null;
+  const { user, ...teacher } = row;
   const rows = await findLessons({ teacherId, date });
-  return { teacher, lessons: rows.map(toLesson) };
+  return { teacher, about: user?.about ?? null, lessons: rows.map(toLesson) };
 }

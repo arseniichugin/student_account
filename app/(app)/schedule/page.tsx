@@ -301,7 +301,12 @@ async function load(
       return {
         kind: "lessons",
         title: res.teacher.fullName,
-        meta: <p>{["Преподаватель", res.teacher.rank].filter(Boolean).join(" · ")}</p>,
+        meta: (
+          <>
+            <p>{["Преподаватель", res.teacher.rank].filter(Boolean).join(" · ")}</p>
+            {res.about && <TeacherAbout text={res.about} />}
+          </>
+        ),
         lessons: res.lessons,
         movedAway,
         showTeacher: false,
@@ -402,4 +407,14 @@ function GroupsByCourse({
 /** Добавляет к дням недели заглушки перенесённых с них занятий. */
 function withMovedAway<T extends { date: string }>(days: T[], movedAway: MovedAwayLesson[]): (T & { movedAway: MovedAwayLesson[] })[] {
   return days.map((d) => ({ ...d, movedAway: movedAway.filter((m) => m.date === d.date) }));
+}
+
+/** «О себе» преподавателя — обычный текст (React экранирует HTML), переводы строк сохраняются. */
+function TeacherAbout({ text }: { text: string }) {
+  return (
+    <details className="mt-1">
+      <summary className="inline-flex min-h-11 cursor-pointer items-center font-medium text-primary">О преподавателе</summary>
+      <p className="mt-1 max-w-prose rounded-xl bg-surface-muted p-3 text-[15px] break-words whitespace-pre-line text-text">{text}</p>
+    </details>
+  );
 }

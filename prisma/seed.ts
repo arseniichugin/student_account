@@ -730,6 +730,34 @@ async function main() {
   }
   for (let i = 0; i < notifications.length; i += 5000) await db.notification.createMany({ data: notifications.slice(i, i + 5000) });
 
+  // ─── «О себе» тестовых аккаунтов ──────────────────────────────────
+  // Тестовые аккаунты общие для всех посетителей: seed возвращает их тексты к исходным
+  // (на случай, если кто-то из посетителей стенда написал своё). Названия дисциплин — из базы.
+  console.log("«О себе» тестовых аккаунтов…");
+  const demoUsers = await db.user.findMany({
+    where: { isDemo: true },
+    select: {
+      id: true,
+      role: true,
+      teacher: { select: { lessons: { select: { discipline: { select: { name: true } } }, distinct: ["disciplineId"], take: 3 } } },
+    },
+  });
+  const firstTestStudent = testStudents[0];
+  for (const u of demoUsers) {
+    let about: string | null = null;
+    if (u.role === "TEACHER") {
+      const subjects = (u.teacher?.lessons ?? []).map((l) => l.discipline.name).join(", ");
+      about =
+        `Веду занятия${subjects ? `: ${subjects}` : ""}.\n` +
+        "Консультации — по средам после последней пары, вопросы можно задать и в рассылке.\n" +
+        "Пропустили занятие — подойдите на консультацию, разберём тему вместе.";
+    } else if (firstTestStudent && u.id === firstTestStudent.userId) {
+      about = `Учусь на ${firstTestStudent.course} курсе, состою в клубе любителей астрономии.\nПишите, если ищете команду для учебного проекта.`;
+    }
+    await db.user.update({ where: { id: u.id }, data: { about, aboutUpdatedAt: about ? msk(2026, 11, 10, 12, 0) : null } });
+  }
+  await db.aboutEdit.deleteMany({ where: { userId: { in: demoUsers.map((u) => u.id) } } });
+
   console.log(
     `\nГотово: оценок в ведомостях ${grades.length}, оценок на занятиях ${marks.length}, отметок посещаемости ${attendance.length}, заявок ${createdRequests.length}, дедлайнов ${deadlines.length}, ` +
       `объявлений ${announcements.length}, уведомлений ${notifications.length}.`,

@@ -102,6 +102,8 @@ Next.js 16 (App Router) + TypeScript · React 19 · Tailwind CSS 4 · PostgreSQL
 app/(auth)/login/        вход
 app/(app)/               кабинет: layout (requireUser) рисует оболочку и меню по роли; error.tsx — «Повторить»
 app/(app)/(student)/     страницы студента: today, grades, requests, profile (layout + КАЖДАЯ страница — requireStudent)
+                         профиль есть у каждой роли: /profile, /staff/profile, /teacher/profile (PROFILE_HREF) —
+                         данные аккаунта, «О себе» и смена пароля (components/profile/)
 app/(app)/(staff)/staff/ кабинет сотрудника деканата (requireStaff); marks/ — ввод оценок: форма (курс → группа →
                          студент → предмет → дата) и таблица (журнал); notifications/ — события и уведомления
 app/(app)/(teacher)/teacher/ кабинет преподавателя (requireTeacher): marks/ — журнал (студенты × занятия: оценки
@@ -120,7 +122,9 @@ instrumentation.ts       проверка базы и миграций при з
 lib/health.ts            checkHealth: доступна ли база, какие миграции этой версии не применены
 lib/actions/errors.ts    runAction — ошибки серверных действий в лог (без данных людей) и понятным текстом в форму
 lib/navigation.ts        меню для каждой роли — ЕДИНСТВЕННОЕ место, где перечислены разделы
-lib/auth/                сессии, пароли, ограничение попыток, guards, серверные действия входа
+lib/auth/                сессии, пароли, ограничение попыток, guards, серверные действия входа и смены пароля
+lib/profile/actions.ts   saveAboutAction — «О себе» любой роли (requireUser, userId только из сессии)
+lib/data/account.ts      блокировка и смена пароля (тестовые аккаунты, DEMO_MODE), «О себе» с лимитом (UserContext)
 lib/data/                ЕДИНСТВЕННОЕ место запросов к базе из страниц; всё фильтруется по контексту
 lib/data/schedule.ts     расписание: личное (StudentContext), группы/преподавателя и поиск (UserContext)
 lib/data/marks.ts        оценки на занятиях: обзор студента (StudentContext), ввод — Grader (StaffContext | TeacherContext)
