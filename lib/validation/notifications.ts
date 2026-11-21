@@ -3,7 +3,7 @@ import { AUDIENCES, STAFF_NOTIFICATION_KINDS } from "@/lib/notifications/labels"
 
 export const ANNOUNCEMENT_TITLE_MAX = 120;
 export const ANNOUNCEMENT_BODY_MAX = 2000;
-/** Сколько подсказок групп показывает поле «Группа». */
+/** Сколько групп/преподавателей возвращают функции suggest… (lib/data/notifications.ts; форма теперь использует полные выпадающие списки). */
 export const GROUP_SUGGEST_LIMIT = 5;
 
 /** Пустая строка из формы → «не задано». */
@@ -34,10 +34,10 @@ export const createAnnouncementSchema = z
   .superRefine((v, ctx) => {
     if (v.audience === "course" && v.course == null) ctx.addIssue({ code: "custom", path: ["course"], message: "Выберите курс" });
     if (v.audience === "group" && !v.groupId) {
-      ctx.addIssue({ code: "custom", path: ["groupId"], message: "Выберите группу из списка подсказок" });
+      ctx.addIssue({ code: "custom", path: ["groupId"], message: "Выберите группу из списка" });
     }
     if (v.audience === "teacher" && !v.teacherId) {
-      ctx.addIssue({ code: "custom", path: ["teacherId"], message: "Выберите преподавателя из списка подсказок" });
+      ctx.addIssue({ code: "custom", path: ["teacherId"], message: "Выберите преподавателя из списка" });
     }
     if (v.when === "later" && !v.sendAt) {
       ctx.addIssue({ code: "custom", path: ["sendAt"], message: "Укажите дату и время отправки" });
