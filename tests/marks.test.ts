@@ -9,12 +9,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { StaffContext, StudentContext } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
 import {
-  createFacultyMark,
-  deleteFacultyMark,
+  createMark,
+  deleteMark,
   getMyMarksOverview,
-  suggestFacultyStudents,
-  suggestStudentDisciplines,
-  suggestStudentLessons,
+  suggestGradableStudents,
+  suggestGradableDisciplines,
+  suggestGradableLessons,
 } from "@/lib/data/marks";
 import {
   academicYearStart,
@@ -146,7 +146,7 @@ describe("Оценки: доступ", () => {
     const lesson = await pastLessonOfA();
     const before = await db.mark.count({ where: { studentId: studentA.studentId, lessonId: lesson.id } });
     for (const value of [5, 3]) {
-      const r = await createFacultyMark(staffA, { studentId: studentA.studentId, lessonId: lesson.id, value });
+      const r = await createMark(staffA, { studentId: studentA.studentId, lessonId: lesson.id, value });
       expect(r.ok).toBe(true);
     }
     const marks = await db.mark.findMany({
@@ -161,17 +161,17 @@ describe("Оценки: доступ", () => {
 
   it("деканат другого факультета не может поставить, найти или удалить оценку студента", async () => {
     const lesson = await pastLessonOfA();
-    const r = await createFacultyMark(staffB, { studentId: studentA.studentId, lessonId: lesson.id, value: 2 });
+    const r = await createMark(staffB, { studentId: studentA.studentId, lessonId: lesson.id, value: 2 });
     expect(r.ok).toBe(false);
 
     const student = await db.student.findUniqueOrThrow({ where: { id: studentA.studentId }, select: { lastName: true } });
-    const found = await suggestFacultyStudents(staffB, student.lastName);
+    const found = await suggestGradableStudents(staffB, student.lastName);
     expect(found.some((x) => x.id === studentA.studentId)).toBe(false);
-    expect(await suggestStudentDisciplines(staffB, studentA.studentId, "")).toEqual([]);
-    expect(await suggestStudentLessons(staffB, studentA.studentId, lesson.disciplineId, "")).toEqual([]);
+    expect(await suggestGradableDisciplines(staffB, studentA.studentId, "")).toEqual([]);
+    expect(await suggestGradableLessons(staffB, studentA.studentId, lesson.disciplineId, "")).toEqual([]);
 
     const markId = created[0]!; // оценка из предыдущего теста
-    expect(await deleteFacultyMark(staffB, markId)).toBe(false);
+    expect(await deleteMark(staffB, markId)).toBe(false);
     expect(await db.mark.count({ where: { id: markId } })).toBe(1);
   });
 
@@ -181,7 +181,7 @@ describe("Оценки: доступ", () => {
       where: { date: { lte: isoDateToDb(today) }, groups: { none: { groupId: { in: groupsA } } } },
       select: { id: true },
     });
-    const r1 = await createFacultyMark(staffA, { studentId: studentA.studentId, lessonId: foreign.id, value: 5 });
+    const r1 = await createMark(staffA, { studentId: studentA.studentId, lessonId: foreign.id, value: 5 });
     expect(r1.ok).toBe(false);
 
     const future = await db.lesson.findFirst({
@@ -189,21 +189,21 @@ describe("Оценки: доступ", () => {
       select: { id: true },
     });
     if (future) {
-      const r2 = await createFacultyMark(staffA, { studentId: studentA.studentId, lessonId: future.id, value: 5 });
+      const r2 = await createMark(staffA, { studentId: studentA.studentId, lessonId: future.id, value: 5 });
       expect(r2.ok).toBe(false);
     }
   });
 
   it("подсказки — не больше 5 и только по прошедшим занятиям студента", async () => {
     const lesson = await pastLessonOfA();
-    const disciplines = await suggestStudentDisciplines(staffA, studentA.studentId, "");
+    const disciplines = await suggestGradableDisciplines(staffA, studentA.studentId, "");
     expect(disciplines.length).toBeGreaterThan(0);
     expect(disciplines.length).toBeLessThanOrEqual(5);
-    const lessons = await suggestStudentLessons(staffA, studentA.studentId, lesson.disciplineId, "");
+    const lessons = await suggestGradableLessons(staffA, studentA.studentId, lesson.disciplineId, "");
     expect(lessons.length).toBeGreaterThan(0);
     expect(lessons.length).toBeLessThanOrEqual(5);
     // занятие, для которого мы ставили оценки, помечено «уже: …»
-    const withMarks = await suggestStudentLessons(staffA, studentA.studentId, lesson.disciplineId, "");
+    const withMarks = await suggestGradableLessons(staffA, studentA.studentId, lesson.disciplineId, "");
     expect(withMarks.some((l) => l.id === lesson.id && l.meta.includes("уже:"))).toBe(true);
     const rows = await db.lesson.findMany({ where: { id: { in: lessons.map((l) => l.id) } }, select: { date: true } });
     expect(rows.every((l) => dbDateToIso(l.date) <= today)).toBe(true);
@@ -211,7 +211,7 @@ describe("Оценки: доступ", () => {
 
   it("свой деканат может удалить оценку; студент B не видит оценок студента A", async () => {
     const id = created.pop()!;
-    expect(await deleteFacultyMark(staffA, id)).toBe(true);
+    expect(await deleteMark(staffA, id)).toBe(true);
     const oB = await getMyMarksOverview(studentB);
     const idsB = oB.byDiscipline.flatMap((d) => d.marks.map((m) => m.id));
     expect(await db.mark.count({ where: { id: { in: idsB }, studentId: studentA.studentId } })).toBe(0);

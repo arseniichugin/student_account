@@ -2,7 +2,7 @@
  * Чистые функции экранов расписания (lib/schedule/*) и меню (lib/navigation.ts). База не нужна.
  */
 import { describe, expect, it } from "vitest";
-import { HOME, NAV, activeNavHref, isNavActive } from "@/lib/navigation";
+import { HOME, NAV, PROFILE_HREF, activeNavHref, isNavActive } from "@/lib/navigation";
 import { moscowDateTime } from "@/lib/moscow-time";
 import {
   dayTiming,
@@ -175,10 +175,15 @@ describe("Адреса", () => {
 });
 
 describe("Меню", () => {
-  it("студент: 6 пунктов, сотрудник: 5; расписание и карта — у обоих", () => {
+  it("студент и сотрудник: 6 пунктов, преподаватель: 5 (без заявок); расписание, карта и профиль — у всех", () => {
     expect(NAV.STUDENT.map((i) => i.href)).toEqual(["/today", "/schedule", "/map", "/grades", "/requests", "/profile"]);
-    expect(NAV.STAFF.map((i) => i.href)).toEqual(["/staff", "/staff/marks", "/staff/notifications", "/schedule", "/map"]);
-    expect(HOME).toEqual({ STUDENT: "/today", STAFF: "/staff" });
+    expect(NAV.STAFF.map((i) => i.href)).toEqual(["/staff", "/staff/marks", "/staff/notifications", "/schedule", "/map", "/staff/profile"]);
+    expect(NAV.TEACHER.map((i) => i.href)).toEqual(["/schedule", "/teacher/marks", "/teacher/notifications", "/map", "/teacher/profile"]);
+    expect(HOME).toEqual({ STUDENT: "/today", STAFF: "/staff", TEACHER: "/schedule" });
+    // Профиль роли — пункт её меню
+    for (const role of ["STUDENT", "STAFF", "TEACHER"] as const) {
+      expect(NAV[role].some((i) => i.href === PROFILE_HREF[role])).toBe(true);
+    }
   });
 
   it("активный пункт — сам раздел и подстраницы, но не похожие адреса", () => {

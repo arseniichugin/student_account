@@ -23,10 +23,23 @@ export type StaffContext = {
   readonly [brand]: "StaffContext";
 };
 
-/** Любой вошедший пользователь — студент или сотрудник деканата. */
+export type TeacherContext = {
+  readonly userId: string;
+  readonly teacherId: string;
+  readonly [brand]: "TeacherContext";
+};
+
+/** Получатель уведомлений: студент или преподаватель (только userId из сессии). */
+export type RecipientContext = {
+  readonly userId: string;
+  readonly role: "STUDENT" | "TEACHER";
+  readonly [brand]: "RecipientContext";
+};
+
+/** Любой вошедший пользователь — студент, сотрудник деканата или преподаватель. */
 export type UserContext = {
   readonly userId: string;
-  readonly role: "STUDENT" | "STAFF";
+  readonly role: "STUDENT" | "STAFF" | "TEACHER";
   /** Факультет студента или сотрудника — например, для фильтра по умолчанию в поиске расписания. */
   readonly facultyId: string | null;
   readonly [brand]: "UserContext";
@@ -36,7 +49,7 @@ export type UserContext = {
 export const requireStudent = cache(async (): Promise<StudentContext> => {
   const session = await getCurrentSession();
   if (!session) redirect("/login");
-  if (session.user.role !== "STUDENT") redirect(HOME.STAFF);
+  if (session.user.role !== "STUDENT") redirect(HOME[session.user.role]);
 
   const student = await db.student.findUnique({
     where: { userId: session.user.id },
@@ -51,7 +64,7 @@ export const requireStudent = cache(async (): Promise<StudentContext> => {
 export const requireStaff = cache(async (): Promise<StaffContext> => {
   const session = await getCurrentSession();
   if (!session) redirect("/login");
-  if (session.user.role !== "STAFF") redirect(HOME.STUDENT);
+  if (session.user.role !== "STAFF") redirect(HOME[session.user.role]);
 
   const staff = await db.staff.findUnique({
     where: { userId: session.user.id },
@@ -62,8 +75,42 @@ export const requireStaff = cache(async (): Promise<StaffContext> => {
   return { userId: session.user.id, staffId: staff.id, facultyId: staff.facultyId } as StaffContext;
 });
 
+/** Страница или действие только для преподавателя. */
+export const requireTeacher = cache(async (): Promise<TeacherContext> => {
+  const ctx = await getTeacherContext();
+  if (ctx) return ctx;
+  const session = await getCurrentSession();
+  if (!session) redirect("/login");
+  if (session.user.role !== "TEACHER") redirect(HOME[session.user.role]);
+  redirect("/login");
+});
+
+/** То же, что requireTeacher, но без редиректа (для API): null, если не вошли или вошли не преподавателем. */
+export const getTeacherContext = cache(async (): Promise<TeacherContext | null> => {
+  const session = await getCurrentSession();
+  if (!session || session.user.role !== "TEACHER") return null;
+  const teacher = await db.teacher.findUnique({ where: { userId: session.user.id }, select: { id: true } });
+  if (!teacher) return null;
+  return { userId: session.user.id, teacherId: teacher.id } as TeacherContext;
+});
+
+/** Страница уведомлений: студент или преподаватель. Сотрудника — в его кабинет. */
+export const requireRecipient = cache(async (): Promise<RecipientContext> => {
+  const session = await getCurrentSession();
+  if (!session) redirect("/login");
+  if (session.user.role === "STUDENT") {
+    const s = await requireStudent();
+    return { userId: s.userId, role: "STUDENT" } as RecipientContext;
+  }
+  if (session.user.role === "TEACHER") {
+    const t = await requireTeacher();
+    return { userId: t.userId, role: "TEACHER" } as RecipientContext;
+  }
+  redirect(HOME[session.user.role]);
+});
+
 /**
- * Страница или действие для любого вошедшего (студента или сотрудника):
+ * Страница или действие для любого вошедшего (студента, сотрудника или преподавателя):
  * например, расписание группы или преподавателя — это открытые данные вуза,
  * но без входа их не показываем. Без сессии — на страницу входа.
  */
@@ -83,9 +130,13 @@ export const getUserContext = cache(async (): Promise<UserContext | null> => {
 
   const user = await db.user.findUnique({
     where: { id: session.user.id },
-    select: { student: { select: { facultyId: true } }, staff: { select: { facultyId: true } } },
+    select: {
+      student: { select: { facultyId: true } },
+      staff: { select: { facultyId: true } },
+      teacher: { select: { id: true } },
+    },
   });
-  if (!user || (!user.student && !user.staff)) return null;
+  if (!user || (!user.student && !user.staff && !user.teacher)) return null;
 
   return {
     userId: session.user.id,

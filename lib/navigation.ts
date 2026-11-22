@@ -6,7 +6,7 @@
  * Модуль без серверного и клиентского кода: его импортируют и guards (сервер), и меню (браузер).
  */
 
-export type NavIcon = "sun" | "calendar" | "map" | "file" | "user" | "inbox" | "chart" | "pen" | "bell";
+export type NavIcon = "sun" | "calendar" | "map" | "file" | "user" | "inbox" | "chart" | "pen" | "bell" | "send";
 
 export type NavItem = {
   href: string;
@@ -16,7 +16,7 @@ export type NavItem = {
   badge?: number;
 };
 
-export type NavRole = "STUDENT" | "STAFF";
+export type NavRole = "STUDENT" | "STAFF" | "TEACHER";
 
 export const NAV: Record<NavRole, NavItem[]> = {
   STUDENT: [
@@ -30,14 +30,27 @@ export const NAV: Record<NavRole, NavItem[]> = {
   STAFF: [
     { href: "/staff", label: "Заявки", icon: "inbox" },
     { href: "/staff/marks", label: "Оценки", icon: "pen" },
-    { href: "/staff/notifications", label: "Уведомления", icon: "bell" },
+    // «Рассылка», а не «Уведомления»: 6 пунктов на 360 px — длинная подпись обрезалась (как у преподавателя)
+    { href: "/staff/notifications", label: "Рассылка", icon: "send" },
     { href: "/schedule", label: "Расписание", icon: "calendar" },
     { href: "/map", label: "Карта", icon: "map" },
+    { href: "/staff/profile", label: "Профиль", icon: "user" },
+  ],
+  // Преподаватель: без заявок и справок. Входящие уведомления — колокольчик в шапке (/notifications).
+  TEACHER: [
+    { href: "/schedule", label: "Расписание", icon: "calendar" },
+    { href: "/teacher/marks", label: "Журнал", icon: "pen" },
+    { href: "/teacher/notifications", label: "Рассылка", icon: "send" },
+    { href: "/map", label: "Карта", icon: "map" },
+    { href: "/teacher/profile", label: "Профиль", icon: "user" },
   ],
 };
 
 /** Главная страница кабинета для роли (логотип, корень сайта). */
-export const HOME: Record<NavRole, string> = { STUDENT: "/today", STAFF: "/staff" };
+export const HOME: Record<NavRole, string> = { STUDENT: "/today", STAFF: "/staff", TEACHER: "/schedule" };
+
+/** Профиль роли: данные аккаунта, «О себе», смена пароля. */
+export const PROFILE_HREF: Record<NavRole, string> = { STUDENT: "/profile", STAFF: "/staff/profile", TEACHER: "/teacher/profile" };
 
 /** Подходит ли пункт меню к адресу: сам раздел или его подстраницы. */
 export function isNavActive(href: string, pathname: string): boolean {

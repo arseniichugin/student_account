@@ -14,7 +14,10 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npx prisma generate && BUILD_STANDALONE=1 npm run build
+# DEPLOYMENT_VERSION — версия сборки для защиты от «старых вкладок» (next.config.ts, deploymentId)
+ARG DEPLOYMENT_VERSION
+RUN npx prisma generate && \
+    DEPLOYMENT_VERSION="${DEPLOYMENT_VERSION:-$(date -u +%Y%m%d%H%M%S)}" BUILD_STANDALONE=1 npm run build
 
 # 3. Запуск: только собранный сервер, без исходников и dev-зависимостей.
 FROM node:22-alpine AS runner

@@ -1,23 +1,37 @@
 import { AppShell, type ShellNotifications, type ShellUser } from "@/components/app-shell";
-import { requireStaff, requireStudent, requireUser } from "@/lib/auth/guards";
+import { requireRecipient, requireStaff, requireStudent, requireTeacher, requireUser } from "@/lib/auth/guards";
+import { countMyNewMarks } from "@/lib/data/marks";
 import { countMyUnreadNotifications } from "@/lib/data/notifications";
 import { getMyStaffProfile, getMyStudentProfile } from "@/lib/data/profile";
+import { countMyChangedRequests } from "@/lib/data/requests";
+import { getMyTeacherProfile } from "@/lib/data/teacher";
 import { HOME, NAV } from "@/lib/navigation";
 
 /**
- * Общая оболочка кабинета для обеих ролей: меню выбирается по роли из lib/navigation.ts.
+ * Общая оболочка кабинета для всех ролей: меню выбирается по роли из lib/navigation.ts.
  * Layout только рисует оболочку — права проверяет КАЖДАЯ страница и каждое действие
- * (requireStudent / requireStaff / requireUser), layout их не защищает.
+ * (requireStudent / requireStaff / requireTeacher / requireUser), layout их не защищает.
  */
 export default async function AppLayout({ children }: LayoutProps<"/">) {
   const { role } = await requireUser();
-  const user = role === "STUDENT" ? await studentShellUser() : await staffShellUser();
-  // Колокольчик — только у студента: уведомления получают студенты, отправляет деканат
-  const notifications: ShellNotifications | undefined =
-    role === "STUDENT" ? { href: "/notifications", unread: await countMyUnreadNotifications(await requireStudent()) } : undefined;
+  const user = role === "STUDENT" ? await studentShellUser() : role === "TEACHER" ? await teacherShellUser() : await staffShellUser();
+
+  let nav = NAV[role];
+  // Колокольчик — у получателей уведомлений: студента и преподавателя (деканат только отправляет)
+  let notifications: ShellNotifications | undefined;
+  if (role !== "STAFF") {
+    notifications = { href: "/notifications", unread: await countMyUnreadNotifications(await requireRecipient()) };
+  }
+  if (role === "STUDENT") {
+    const ctx = await requireStudent();
+    const [newMarks, changedRequests] = await Promise.all([countMyNewMarks(ctx), countMyChangedRequests(ctx)]);
+    // Кружки с числом: новые оценки и заявки с изменившимся статусом
+    const badges: Record<string, number> = { "/grades": newMarks, "/requests": changedRequests };
+    nav = nav.map((item) => (badges[item.href] ? { ...item, badge: badges[item.href] } : item));
+  }
 
   return (
-    <AppShell nav={NAV[role]} homeHref={HOME[role]} user={user} notifications={notifications}>
+    <AppShell nav={nav} homeHref={HOME[role]} user={user} notifications={notifications}>
       {children}
     </AppShell>
   );
@@ -29,6 +43,16 @@ async function studentShellUser(): Promise<ShellUser> {
     name: `${p.firstName} ${p.lastName}`,
     meta: `${p.faculty.code} · ${p.course} курс · ${p.academicGroup.name}`,
     initials: `${p.firstName[0]}${p.lastName[0]}`,
+  };
+}
+
+async function teacherShellUser(): Promise<ShellUser> {
+  const p = await getMyTeacherProfile(await requireTeacher());
+  const [lastName = "", firstName = "", middleName = ""] = p.fullName.split(" ");
+  return {
+    name: `${firstName} ${middleName} ${lastName}`.replace(/\s+/g, " ").trim(),
+    meta: ["Преподаватель", p.rank].filter(Boolean).join(" · "),
+    initials: `${firstName[0] ?? ""}${lastName[0] ?? ""}`,
   };
 }
 

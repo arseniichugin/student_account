@@ -1,8 +1,9 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireStudent } from "@/lib/auth/guards";
-import { MAX_ACTIVE_REQUESTS, MAX_REQUESTS_PER_HOUR, createMyRequest } from "@/lib/data/requests";
+import { MAX_ACTIVE_REQUESTS, MAX_REQUESTS_PER_HOUR, createMyRequest, markMyRequestsSeen } from "@/lib/data/requests";
 import { createRequestSchema } from "@/lib/validation/requests";
 
 export type NewRequestState = { error?: string } | undefined;
@@ -30,4 +31,11 @@ export async function createRequestAction(_prev: NewRequestState, formData: Form
   }
 
   redirect(`/requests/${result.id}?created=1`);
+}
+
+/** Студент открыл «Заявки» — изменения статусов просмотрены, кружок в меню пропадает. */
+export async function markRequestsSeenAction(): Promise<void> {
+  const ctx = await requireStudent();
+  const changed = await markMyRequestsSeen(ctx);
+  if (changed > 0) revalidatePath("/", "layout");
 }

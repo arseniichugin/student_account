@@ -8,7 +8,7 @@ import { WeekView } from "@/components/schedule/week-view";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/states";
-import { requireStudent, requireUser, type UserContext } from "@/lib/auth/guards";
+import { requireStudent, requireTeacher, requireUser, type UserContext } from "@/lib/auth/guards";
 import { UNIVERSITY_NAME } from "@/lib/config";
 import { getMyStudentProfile } from "@/lib/data/profile";
 import {
@@ -56,7 +56,7 @@ type Loaded =
 /**
  * Расписание любой группы или преподавателя (открытые данные вуза, только для вошедших).
  * Адрес: /schedule?group=<id> | ?teacher=<id>, &date=YYYY-MM-DD, &view=week|day.
- * Без цели: студенту — его расписание (академическая + его языковые группы), сотруднику — выбор группы.
+ * Без цели: студенту — его расписание (академическая + его языковые группы), преподавателю — его расписание, сотруднику — выбор группы.
  */
 export default async function SchedulePage({ searchParams }: PageProps<"/schedule">) {
   const ctx = await requireUser();
@@ -97,7 +97,7 @@ export default async function SchedulePage({ searchParams }: PageProps<"/schedul
         <ScheduleSearch faculties={faculties.map((f) => ({ id: f.id, name: f.name }))} date={linkDate} view={view} />
       </Card>
 
-      {target && ctx.role === "STUDENT" && (
+      {target && ctx.role !== "STAFF" && (
         <Link
           href={scheduleHref({ date: linkDate, view })}
           className={buttonVariants({ variant: "ghost", className: "-ml-3" })}
@@ -301,7 +301,12 @@ async function load(
       return {
         kind: "lessons",
         title: res.teacher.fullName,
-        meta: <p>{["Преподаватель", res.teacher.rank].filter(Boolean).join(" · ")}</p>,
+        meta: (
+          <>
+            <p>{["Преподаватель", res.teacher.rank].filter(Boolean).join(" · ")}</p>
+            {res.about && <TeacherAbout text={res.about} />}
+          </>
+        ),
         lessons: res.lessons,
         movedAway,
         showTeacher: false,
@@ -337,6 +342,25 @@ async function load(
         lessons,
         movedAway,
         showTeacher: true,
+      };
+    }
+
+    if (ctx.role === "TEACHER") {
+      // Преподавателю по умолчанию — его расписание (все его группы)
+      const teacher = await requireTeacher();
+      const [res, movedAway] = await Promise.all([
+        getTeacherSchedule(ctx, teacher.teacherId, from, to),
+        getTeacherMovedAway(ctx, teacher.teacherId, from, to),
+      ]);
+      if (!res) return { kind: "notFound", what: "teacher" };
+      return {
+        kind: "lessons",
+        title: "Моё расписание",
+        meta: <p>{[res.teacher.fullName, res.teacher.rank].filter(Boolean).join(" · ")}</p>,
+        lessons: res.lessons,
+        movedAway,
+        showTeacher: false,
+        showGroups: true,
       };
     }
 
@@ -383,4 +407,14 @@ function GroupsByCourse({
 /** Добавляет к дням недели заглушки перенесённых с них занятий. */
 function withMovedAway<T extends { date: string }>(days: T[], movedAway: MovedAwayLesson[]): (T & { movedAway: MovedAwayLesson[] })[] {
   return days.map((d) => ({ ...d, movedAway: movedAway.filter((m) => m.date === d.date) }));
+}
+
+/** «О себе» преподавателя — обычный текст (React экранирует HTML), переводы строк сохраняются. */
+function TeacherAbout({ text }: { text: string }) {
+  return (
+    <details className="mt-1">
+      <summary className="inline-flex min-h-11 cursor-pointer items-center font-medium text-primary">О преподавателе</summary>
+      <p className="mt-1 max-w-prose rounded-xl bg-surface-muted p-3 text-[15px] break-words whitespace-pre-line text-text">{text}</p>
+    </details>
+  );
 }
